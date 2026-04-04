@@ -1,0 +1,269 @@
+# kotlin-rate-limiter
+
+A coroutine-native rate limiter for Kotlin. Controls the pace of outbound requests to external APIs using suspending functions — no threads blocked, no timers running, no framework dependencies.
+
+Built as a final project for [Coroutines Mastery](https://coroutinesmastery.com/) by Marcin Moskała.
+
+## Why?
+
+There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460) on kotlinx.coroutines (since 2018!) requesting a suspendable rate limiter. A [PR was submitted and closed](https://github.com/Kotlin/kotlinx.coroutines/pull/2799) without being merged. The existing options are either Java-based wrappers (resilience4j, Bucket4j) that don't integrate with virtual time testing, or part of large resilience frameworks where you pull in the whole kitchen sink for one primitive.
+
+This library is:
+
+- **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` and `AtomicReference`, no Java concurrency primitives.
+- **Testable with virtual time** — inject `testScheduler.timeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
+- **Focused** — two functions, one interface. No framework, no annotations, no configuration files.
+- **Client-side** — designed for throttling your outbound API calls, not for protecting your server endpoints.
+
+## Installation
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("ratelimiter:kotlin-rate-limiter:0.1.0")
+}
+```
+
+## Quick Start
+
+```kotlin
+import ratelimiter.BurstyRateLimiter
+import ratelimiter.withPermit
+import kotlin.time.Duration.Companion.seconds
+
+val limiter = BurstyRateLimiter(permits = 10, per = 1.seconds)
+
+suspend fun fetchProperty(address: String): Property = limiter.withPermit {
+    httpClient.get("https://api.example.com/property/$address").body()
+}
+```
+
+## API
+
+### Interface
+
+```kotlin
+interface RateLimiter {
+    suspend fun acquire(permits: Int = 1)
+    fun tryAcquire(permits: Int = 1): Permit
+}
+
+sealed interface Permit {
+    data object Granted : Permit
+    data class Denied(val retryAfter: Duration) : Permit
+}
+```
+
+`acquire()` suspends until permits are available. `tryAcquire()` returns immediately with `Granted` or `Denied(retryAfter)`.
+
+Need a timeout? Use the standard library:
+
+```kotlin
+withTimeout(3.seconds) {
+    limiter.acquire()
+}
+```
+
+### Factory Functions
+
+#### BurstyRateLimiter
+
+Token bucket algorithm. Allows bursts up to the permit count, then paces requests. Use when an external API says "100 requests per minute" and you want maximum throughput while staying compliant.
+
+```kotlin
+val limiter = BurstyRateLimiter(
+    permits = 100,
+    per = 1.minutes,
+    maxBurst = 100,                       // max permits that accumulate during idle (default: permits)
+    timeSource = TimeSource.Monotonic     // injectable for testing
+)
+```
+
+#### SmoothRateLimiter
+
+Distributes permits evenly over time. If you configure 10 per second, permits are released every 100ms. No bursting. Use when you want to create even load on a downstream service.
+
+```kotlin
+val limiter = SmoothRateLimiter(
+    permits = 10,
+    per = 1.seconds,
+    warmupDuration = Duration.ZERO,       // optional ramp-up period
+    timeSource = TimeSource.Monotonic
+)
+```
+
+#### CompositeRateLimiter
+
+Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. Use for APIs with layered limits.
+
+```kotlin
+val limiter = CompositeRateLimiter(
+    BurstyRateLimiter(permits = 10, per = 1.seconds),
+    BurstyRateLimiter(permits = 1000, per = 24.hours)
+)
+```
+
+### Extensions
+
+```kotlin
+// Wrap a block with rate limiting
+val result = limiter.withPermit {
+    api.fetchData()
+}
+
+// Rate limit a Flow (per-emission, not per-collection)
+addressFlow
+    .rateLimit(limiter)
+    .map { address -> api.fetch(address) }
+    .collect { save(it) }
+```
+
+## Usage Examples
+
+### Batch Processing
+
+Process a large list of items while respecting API rate limits. All coroutines coordinate through the shared limiter.
+
+```kotlin
+val limiter = BurstyRateLimiter(permits = 10, per = 1.seconds)
+
+suspend fun enrichAllProperties(addresses: List<String>): List<Property> =
+    coroutineScope {
+        addresses.map { address ->
+            async {
+                limiter.withPermit {
+                    attomApi.fetchProperty(address)
+                }
+            }
+        }.awaitAll()
+    }
+```
+
+### Multi-Permit Acquire (Bandwidth Limiting)
+
+Charge different costs for different operations.
+
+```kotlin
+val bandwidthLimiter = SmoothRateLimiter(
+    permits = 10_000_000,  // 10MB per second
+    per = 1.seconds
+)
+
+suspend fun uploadChunk(data: ByteArray) {
+    bandwidthLimiter.acquire(permits = data.size)
+    s3Client.putObject(data)
+}
+```
+
+### Cost Control
+
+Prevent a runaway loop from racking up charges on a paid API.
+
+```kotlin
+val paidApiLimiter = BurstyRateLimiter(permits = 10_000, per = 24.hours)
+
+suspend fun checkCreditScore(userId: String): Score = paidApiLimiter.withPermit {
+    creditApi.check(userId)  // $0.10 per call
+}
+```
+
+### Conditional Fallback with tryAcquire
+
+Serve from cache when rate limited instead of waiting.
+
+```kotlin
+suspend fun getProperty(address: String): Property {
+    return when (limiter.tryAcquire()) {
+        is Permit.Granted -> {
+            val fresh = api.fetch(address)
+            cache.put(address, fresh)
+            fresh
+        }
+        is Permit.Denied -> {
+            cache.get(address) ?: throw ServiceUnavailableException()
+        }
+    }
+}
+```
+
+### Flow Pipeline
+
+```kotlin
+val scrapeLimiter = SmoothRateLimiter(permits = 2, per = 1.seconds)
+
+urlFlow
+    .rateLimit(scrapeLimiter)
+    .map { url -> httpClient.get(url).bodyAsText() }
+    .map { html -> parseListings(html) }
+    .collect { listings -> db.insertAll(listings) }
+```
+
+## Testing
+
+The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testScheduler.timeSource` to tie the rate limiter's clock to virtual time:
+
+```kotlin
+@Test
+fun `acquire suspends when permits exhausted`() = runTest {
+    val limiter = BurstyRateLimiter(
+        permits = 2,
+        per = 1.seconds,
+        timeSource = testScheduler.timeSource
+    )
+
+    limiter.acquire()  // instant
+    limiter.acquire()  // instant — both permits consumed
+
+    var acquired = false
+    launch {
+        limiter.acquire()  // suspends
+        acquired = true
+    }
+
+    runCurrent()
+    assertFalse(acquired)
+
+    advanceTimeBy(500.milliseconds)
+    runCurrent()
+    assertTrue(acquired)
+}
+```
+
+For tests that don't care about rate limiting behavior, inject a no-op limiter:
+
+```kotlin
+val noOpLimiter = object : RateLimiter {
+    override suspend fun acquire(permits: Int) {}
+    override fun tryAcquire(permits: Int) = Permit.Granted
+}
+```
+
+## Design Decisions
+
+### Why `acquire()` + `tryAcquire()` and not `tryAcquire(timeout)`?
+
+`acquire()` suspends, so you compose timeouts with the standard `withTimeout {}` / `withTimeoutOrNull {}` from kotlinx.coroutines. No need to reinvent what already exists. `tryAcquire()` exists for the non-suspending "check and decide" case where you want the `retryAfter` hint.
+
+This matches the convention established by Guava's `RateLimiter` and resilience4j.
+
+### Why AtomicReference + CAS instead of Mutex?
+
+Lock-free implementation means `tryAcquire()` works naturally as a non-suspend function, `refill()` is a pure function that's easy to test in isolation, and there's no coroutine suspension just for bookkeeping under contention.
+
+### Why lazy refill instead of a background coroutine?
+
+The limiter calculates how many permits *would have been* added since the last access, rather than running a timer. This means no `CoroutineScope` required, no lifecycle to manage, no cleanup — just create the limiter and use it.
+
+### Why client-side only?
+
+Server-side rate limiting (protecting your API from callers) is a different problem with different tools — Ktor has a built-in plugin, nginx handles it at the infrastructure level. Client-side rate limiting (throttling your outbound calls) is the underserved use case where developers are rolling their own `while(isActive) { delay() }` loops.
+
+## Acknowledgments
+
+- [kotlinx.coroutines issue #460](https://github.com/Kotlin/kotlinx.coroutines/issues/460) and [PR #2799](https://github.com/Kotlin/kotlinx.coroutines/pull/2799) for design insights
+- [Guava RateLimiter](https://github.com/google/guava/blob/master/guava/src/com/google/common/util/concurrent/RateLimiter.java) for the token bucket implementation patterns and test strategies
+- [lowasser's comments](https://github.com/Kotlin/kotlinx.coroutines/pull/2799#issuecomment-871557098) on multi-permit acquire and burstiness control from Google's experience with Guava
+
+## License
+
+MIT
