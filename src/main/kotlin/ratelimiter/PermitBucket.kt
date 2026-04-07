@@ -20,7 +20,7 @@ internal data class PermitBucket(
 
         return this.copy(
             available = (available + refillAmount).coerceAtMost(capacity),
-            refilledAt = timeSource.markNow()
+            refilledAt = timeSource.markNow(),
         )
     }
 
