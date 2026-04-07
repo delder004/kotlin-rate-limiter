@@ -7,6 +7,9 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -15,6 +18,15 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FuzzTest {
+    companion object {
+        @JvmStatic
+        fun limiterTypes(): List<Arguments> =
+            listOf(
+                Arguments.of("bursty"),
+                Arguments.of("smooth"),
+            )
+    }
+
     @Test
     fun `bursty - total delay matches permits consumed with random batch sizes`() =
         runTest {
@@ -78,23 +90,16 @@ class FuzzTest {
             assertEquals(expectedDelay, currentTime)
         }
 
-    @Test
-    fun `bursty - tryAcquire denials do not affect acquire timing`() =
+    @ParameterizedTest(name = "{0} - tryAcquire denials do not affect acquire timing")
+    @MethodSource("limiterTypes")
+    fun `tryAcquire denials do not affect acquire timing`(type: String) =
         runTest {
-            val limiter = BurstyRateLimiter(5, 1.seconds, testTimeSource)
-            limiter.acquire(5) // exhaust
-
-            repeat(1000) { limiter.tryAcquire() }
-
-            val before = currentTime
-            limiter.acquire()
-            assertEquals(200L, currentTime - before)
-        }
-
-    @Test
-    fun `smooth - tryAcquire denials do not affect acquire timing`() =
-        runTest {
-            val limiter = SmoothRateLimiter(5, 1.seconds, Duration.ZERO, testTimeSource)
+            val limiter =
+                when (type) {
+                    "bursty" -> BurstyRateLimiter(5, 1.seconds, testTimeSource)
+                    "smooth" -> SmoothRateLimiter(5, 1.seconds, Duration.ZERO, testTimeSource)
+                    else -> error("unknown type: $type")
+                }
             limiter.acquire(5) // exhaust
 
             repeat(1000) { limiter.tryAcquire() }

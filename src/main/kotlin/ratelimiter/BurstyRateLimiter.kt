@@ -33,7 +33,7 @@ internal class BurstyRateLimiterImpl(
                 capacity = permits.toDouble(),
                 timeSource = timeSource,
                 refilledAt = timeSource.markNow(),
-                refillInterval = period / permits,
+                stableRefillInterval = period / permits,
             ),
         )
 

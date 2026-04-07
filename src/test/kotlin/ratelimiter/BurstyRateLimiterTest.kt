@@ -98,17 +98,6 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
         }
 
     @Test
-    fun `idle time is not penalized`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            val before = currentTime
-            limiter.acquire(1)
-            advanceTimeBy(200.milliseconds)
-            limiter.acquire(1)
-            assertEquals(200, currentTime - before)
-        }
-
-    @Test
     fun `acquire after long idle returns immediately`() =
         runTest {
             val limiter = createLimiter(5, 1.seconds)

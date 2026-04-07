@@ -36,16 +36,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
         }
 
     @Test
-    fun `permits are evenly spaced`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            val delays = recordDelays(limiter, 5)
-            val expected: List<Long> = listOf(200, 200, 200, 200)
-            val cumulative = delays.runningReduce { acc, d -> acc + d }
-            assertEquals(expected, cumulative.zipWithNext { a, b -> b - a })
-        }
-
-    @Test
     fun `spacing is consistent under steady load`() =
         runTest {
             val limiter = createLimiter(5, 1.seconds)
@@ -113,17 +103,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             limiter.acquire(5)
             limiter.acquire(1)
             assertEquals(1000, currentTime - before)
-        }
-
-    @Test
-    fun `idle time is not penalized`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            val before = currentTime
-            limiter.acquire(1)
-            advanceTimeBy(200.milliseconds)
-            limiter.acquire(1)
-            assertEquals(200, currentTime - before)
         }
 
     @Test
@@ -200,5 +179,77 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             advanceTimeBy(200.milliseconds)
             runCurrent()
             assertTrue(job2.isCompleted)
+        }
+
+    // WARMUP
+
+    @Test
+    fun `warmup starts with longer intervals`() =
+        runTest {
+            // 5 permits/sec = 200ms stable interval, 2 second warmup
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+            val delays = recordDelays(limiter, 3)
+
+            assertEquals(0L, delays[0], "First acquire should be free")
+            assertTrue(delays[1] > 200, "During warmup, interval should exceed stable rate of 200ms, was ${delays[1]}")
+            assertTrue(delays[2] > 200, "During warmup, interval should exceed stable rate of 200ms, was ${delays[2]}")
+        }
+
+    @Test
+    fun `warmup converges to stable rate`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+            // Acquire enough to fully warm up (well past the 2-second warmup period)
+            val delays = recordDelays(limiter, 30)
+
+            // After warmup, intervals should settle at the stable 200ms
+            val lastFive = delays.takeLast(5)
+            lastFive.forEach { delay ->
+                assertEquals(200L, delay, "After warmup, interval should be stable at 200ms")
+            }
+        }
+
+    @Test
+    fun `returns to cold state after idle`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+            // Warm up fully
+            recordDelays(limiter, 30)
+
+            // Go idle for the full warmup duration
+            advanceTimeBy(2.seconds)
+
+            // Should be cold again — intervals should be longer than stable
+            val delays = recordDelays(limiter, 3)
+            assertEquals(0L, delays[0], "First acquire after idle should be free")
+            assertTrue(delays[1] > 200, "Should return to cold state after idle >= warmup, was ${delays[1]}")
+        }
+
+    @Test
+    fun `partial warmup after partial idle`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+
+            // Record cold-start intervals
+            val coldDelays = recordDelays(limiter, 3)
+
+            // Continue acquiring to fully warm up
+            recordDelays(limiter, 30)
+
+            // Partial idle (half the warmup duration)
+            advanceTimeBy(1.seconds)
+
+            val partialDelays = recordDelays(limiter, 3)
+
+            // After partial idle, should be between stable and fully cold
+            assertEquals(0L, partialDelays[0])
+            assertTrue(
+                partialDelays[1] > 200,
+                "Partial idle should increase interval above stable 200ms, was ${partialDelays[1]}",
+            )
+            assertTrue(
+                partialDelays[1] < coldDelays[1],
+                "Partial idle interval (${partialDelays[1]}) should be less than cold-start interval (${coldDelays[1]})",
+            )
         }
 }

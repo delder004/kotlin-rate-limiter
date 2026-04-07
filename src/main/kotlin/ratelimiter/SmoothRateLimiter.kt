@@ -36,7 +36,8 @@ internal class SmoothRateLimiterImpl(
                 capacity = 1.0,
                 timeSource = timeSource,
                 refilledAt = timeSource.markNow(),
-                refillInterval = period / permits,
+                stableRefillInterval = period / permits,
+                warmup = warmup,
             ),
         )
 

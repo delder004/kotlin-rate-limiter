@@ -9,6 +9,9 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import kotlin.test.assertEquals
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -16,66 +19,90 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConcurrencyTest {
+    companion object {
+        @JvmStatic
+        fun limiterTypes(): List<Arguments> =
+            listOf(
+                Arguments.of("bursty"),
+                Arguments.of("smooth"),
+            )
+    }
+
     @Test
     fun `bursty - all acquires complete under contention`() =
         runTest {
             val limiter = BurstyRateLimiter(100, 1.seconds, testTimeSource)
-            var completed = 0
+            val timestamps = mutableListOf<Long>()
 
             (1..500).map {
                 launch {
                     limiter.acquire()
-                    completed++
+                    timestamps.add(currentTime)
                 }
             }
             advanceUntilIdle()
 
-            assertEquals(500, completed, "All 500 acquires should complete")
+            assertEquals(500, timestamps.size, "All 500 acquires should complete")
             // 100 burst instantly + 400 at 10ms each = 4000ms
             assertEquals(4000L, currentTime)
+            // Token bucket bound: up to capacity burst + 1 window of refill
+            assertRateNotExceeded(timestamps, limit = 200, windowMs = 1000)
         }
 
     @Test
     fun `smooth - all acquires complete under contention`() =
         runTest {
             val limiter = SmoothRateLimiter(100, 1.seconds, Duration.ZERO, testTimeSource)
-            var completed = 0
+            val timestamps = mutableListOf<Long>()
 
             (1..500).map {
                 launch {
                     limiter.acquire()
-                    completed++
+                    timestamps.add(currentTime)
                 }
             }
             advanceUntilIdle()
 
-            assertEquals(500, completed, "All 500 acquires should complete")
+            assertEquals(500, timestamps.size, "All 500 acquires should complete")
             // smooth: capacity=1, so 1 instant + 499 * 10ms = 4990ms
             assertEquals(4990L, currentTime)
+            assertRateNotExceeded(timestamps, limit = 100, windowMs = 1000)
         }
 
     @Test
-    fun `bursty - acquire grants in arrival order`() =
+    fun `composite - all acquires complete under contention`() =
         runTest {
-            val limiter = BurstyRateLimiter(1, 1.seconds, testTimeSource)
-            limiter.acquire() // exhaust
+            val limiter =
+                CompositeRateLimiter(
+                    BurstyRateLimiter(100, 1.seconds, testTimeSource),
+                    SmoothRateLimiter(100, 1.seconds, Duration.ZERO, testTimeSource),
+                )
+            val timestamps = mutableListOf<Long>()
 
-            val completionOrder = mutableListOf<Int>()
-            (1..5).map { i ->
+            (1..500).map {
                 launch {
                     limiter.acquire()
-                    completionOrder.add(i)
+                    timestamps.add(currentTime)
                 }
             }
             advanceUntilIdle()
 
-            assertEquals(listOf(1, 2, 3, 4, 5), completionOrder)
+            assertEquals(500, timestamps.size, "All 500 acquires should complete")
+            // Smooth limiter is most restrictive: capacity=1, so 1 instant + 499 * 10ms = 4990ms
+            assertEquals(4990L, currentTime)
+            assertRateNotExceeded(timestamps, limit = 100, windowMs = 1000)
         }
 
-    @Test
-    fun `smooth - acquire grants in arrival order`() =
+    @ParameterizedTest(name = "{0} - acquire grants in arrival order")
+    @MethodSource("limiterTypes")
+    fun `acquire grants in arrival order`(type: String) =
         runTest {
-            val limiter = SmoothRateLimiter(1, 1.seconds, Duration.ZERO, testTimeSource)
+            val limiter =
+                when (type) {
+                    "bursty" -> BurstyRateLimiter(1, 1.seconds, testTimeSource)
+                    "smooth" -> SmoothRateLimiter(1, 1.seconds, Duration.ZERO, testTimeSource)
+                    else -> error("unknown type: $type")
+                }
             limiter.acquire() // exhaust
 
             val completionOrder = mutableListOf<Int>()
