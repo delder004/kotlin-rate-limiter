@@ -120,6 +120,13 @@ abstract class RateLimiterContractTest {
         }
 
     @Test
+    fun `tryAcquire rejects negative permits`() =
+        runTest {
+            val limiter = createLimiter(permits = 5, per = 1.seconds)
+            assertFailsWith<IllegalArgumentException> { limiter.tryAcquire(-1) }
+        }
+
+    @Test
     fun `factory rejects zero permits`() =
         runTest {
             assertFailsWith<IllegalArgumentException> { createLimiter(permits = 0, per = 1.seconds) }
@@ -135,6 +142,12 @@ abstract class RateLimiterContractTest {
     fun `factory rejects negative duration`() =
         runTest {
             assertFailsWith<IllegalArgumentException> { createLimiter(permits = 5, per = (-1).seconds) }
+        }
+
+    @Test
+    fun `factory rejects negative permits`() =
+        runTest {
+            assertFailsWith<IllegalArgumentException> { createLimiter(permits = -1, per = 1.seconds) }
         }
 
     // CANCELLATION
@@ -253,8 +266,22 @@ abstract class RateLimiterContractTest {
                 .rateLimit(limiter)
                 .collect { timestamps.add(currentTime) }
 
-            // With 2 permits/sec, 5 items can't all happen at t=0
-            assertTrue(timestamps.last() > 0, "Emissions should be individually rate limited")
+            assertEquals(5, timestamps.size)
+            // Timestamps must be monotonically non-decreasing
+            timestamps.zipWithNext().forEach { (a, b) ->
+                assertTrue(b >= a, "Timestamps should be non-decreasing: $a -> $b")
+            }
+            // 5 items at 2/sec requires at least 1500ms (bursty: 2 burst + 3*500ms)
+            assertTrue(
+                timestamps.last() >= 1500,
+                "5 items at 2/sec should take >= 1500ms, was ${timestamps.last()}",
+            )
+            // At least some emissions should have non-zero gaps between them
+            val nonZeroGaps = timestamps.zipWithNext().count { (a, b) -> b > a }
+            assertTrue(
+                nonZeroGaps >= 2,
+                "Expected at least 2 non-zero gaps between emissions, got $nonZeroGaps",
+            )
         }
 
     @Test
