@@ -74,7 +74,6 @@ Token bucket algorithm. Allows bursts up to the permit count, then paces request
 val limiter = BurstyRateLimiter(
     permits = 100,
     per = 1.minutes,
-    maxBurst = 100,                       // max permits that accumulate during idle (default: permits)
     timeSource = TimeSource.Monotonic     // injectable for testing
 )
 ```
