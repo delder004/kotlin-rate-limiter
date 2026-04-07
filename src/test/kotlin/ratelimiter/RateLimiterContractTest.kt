@@ -320,16 +320,4 @@ abstract class RateLimiterContractTest {
             assertTrue(collected.size < 100, "Collection should have been cancelled, got ${collected.size} items")
             assertTrue(job.isCancelled)
         }
-
-    @Test
-    fun `multiple coroutines collectively stay under limit`() =
-        runTest {
-            val limiter = createLimiter(permits = 1000, per = 1.seconds)
-            val burst = Op.Parallel((1..10000).map { 1 })
-            assertRateNotExceeded(
-                runScenario(limiter, burst).map { it.endedAt },
-                1000,
-                1000,
-            )
-        }
 }

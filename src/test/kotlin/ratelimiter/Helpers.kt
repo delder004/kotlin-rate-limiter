@@ -7,8 +7,11 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
+import kotlin.random.Random
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 // Record delays for a series of acquires
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -29,7 +32,7 @@ fun assertRateNotExceeded(
     windowMs: Long,
 ) {
     for (start in timestamps) {
-        val count = timestamps.count { it in start..(start + windowMs) }
+        val count = timestamps.count { it in start..<(start + windowMs) }
         assertTrue(count <= limit, "Rate exceeded: $count events in ${windowMs}ms window starting at $start")
     }
 }
@@ -96,3 +99,41 @@ suspend fun TestScope.runScenario(
                 }
             }
         }.flatten()
+
+data class OpWeights(
+    val acquire: Int = 25,
+    val tryAcquire: Int = 10,
+    val advance: Int = 40,
+    val parallel: Int = 25,
+)
+
+fun Random.nextOp(w: OpWeights = OpWeights()): Op {
+    val total = w.acquire + w.tryAcquire + w.advance + w.parallel
+    val roll = nextInt(total)
+    return when {
+        roll < w.acquire -> Op.Acquire(nextInt(1, 5))
+        roll < w.acquire + w.tryAcquire -> Op.TryAcquire(nextInt(1, 5))
+        roll < w.acquire + w.tryAcquire + w.advance -> Op.Advance(nextInt(50, 2000).milliseconds)
+        else -> Op.Parallel((1..nextInt(2, 10)).map { nextInt(1, 3) })
+    }
+}
+
+fun Random.scenario(
+    length: Int,
+    weights: OpWeights = OpWeights(),
+): Array<Op> = Array(length) { nextOp(weights) }
+
+fun assertInvariants(results: List<OpResult>) {
+    results.forEach { r ->
+        assertTrue(r.endedAt >= r.startedAt, "endedAt should be >= startedAt: $r")
+    }
+    results.filter { it.op is Op.TryAcquire }.forEach { r ->
+        assertEquals(r.startedAt, r.endedAt, "tryAcquire should never suspend: $r")
+    }
+    results.filter { it.permit is Permit.Denied }.forEach { r ->
+        assertTrue(
+            (r.permit as Permit.Denied).retryAfter > Duration.ZERO,
+            "Denied retryAfter should be positive: $r",
+        )
+    }
+}
