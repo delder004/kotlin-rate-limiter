@@ -54,9 +54,8 @@ Token bucket algorithm. This is the most important and most-used implementation.
 **Factory function:**
 ```kotlin
 fun BurstyRateLimiter(
-    permits: Long,
+    permits: Int,
     per: Duration,
-    maxBurst: Long = permits,
     timeSource: TimeSource = TimeSource.Monotonic
 ): RateLimiter
 ```
@@ -71,7 +70,7 @@ Stored as an immutable `data class State` inside an `AtomicReference`.
 
 Key calculations:
 - `intervalNanos = period.inWholeNanoseconds / permits` — time between individual permits
-- `refill(current: State): State` — pure function, calculates how many permits would have accumulated since `lastRefillMark`, caps at `maxBurst`
+- `refill(current: State): State` — pure function, calculates how many permits would have accumulated since `lastRefillMark`, caps at `permits` (bucket size = rate)
 - `reservePermits(permits: Int): Duration` — CAS loop that refills, subtracts permits (may go negative), returns wait duration
 
 Acquire flow:
@@ -97,7 +96,7 @@ Distributes permits evenly. If configured for 10/sec, one permit is released eve
 **Factory function:**
 ```kotlin
 fun SmoothRateLimiter(
-    permits: Long,
+    permits: Int,
     per: Duration,
     warmupDuration: Duration = Duration.ZERO,
     timeSource: TimeSource = TimeSource.Monotonic

@@ -2,8 +2,6 @@
 
 A coroutine-native rate limiter for Kotlin. Controls the pace of outbound requests to external APIs using suspending functions — no threads blocked, no timers running, no framework dependencies.
 
-Built as a final project for [Coroutines Mastery](https://coroutinesmastery.com/) by Marcin Moskała.
-
 ## Why?
 
 There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460) on kotlinx.coroutines (since 2018!) requesting a suspendable rate limiter. A [PR was submitted and closed](https://github.com/Kotlin/kotlinx.coroutines/pull/2799) without being merged. The existing options are either Java-based wrappers (resilience4j, Bucket4j) that don't integrate with virtual time testing, or part of large resilience frameworks where you pull in the whole kitchen sink for one primitive.

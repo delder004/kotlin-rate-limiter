@@ -20,14 +20,13 @@ sealed interface Permit {
 // === Factory Functions ===
 
 fun BurstyRateLimiter(
-    permits: Long,
+    permits: Int,
     per: Duration,
-    maxBurst: Long = permits,
     timeSource: TimeSource = TimeSource.Monotonic
 ): RateLimiter
 
 fun SmoothRateLimiter(
-    permits: Long,
+    permits: Int,
     per: Duration,
     warmupDuration: Duration = Duration.ZERO,
     timeSource: TimeSource = TimeSource.Monotonic
@@ -75,9 +74,9 @@ This is a better approach than:
 - Guava's `SleepingStopwatch` (custom abstraction specific to Guava)
 - The failed PR's `System.currentTimeMillis()` (affected by clock changes, can't use virtual time)
 
-### Why `Long` for permits parameter in factory, `Int` for acquire?
+### Why `Int` for permits?
 
-Factory uses `Long` because you might configure 10,000,000 permits/sec for bandwidth limiting. `acquire` uses `Int` because you'd never acquire more than `Int.MAX_VALUE` permits in a single call — and it matches `Semaphore.acquire(permits: Int)` from kotlinx.coroutines.
+`Int` is sufficient for all practical rate limits and matches `Semaphore.acquire(permits: Int)` from kotlinx.coroutines. Even bandwidth limiting at 10MB/sec fits comfortably within `Int.MAX_VALUE`.
 
 ### Why does acquire go negative?
 
