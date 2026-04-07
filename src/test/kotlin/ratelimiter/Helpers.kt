@@ -1,7 +1,8 @@
 package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -63,28 +64,35 @@ suspend fun TestScope.runScenario(
     limiter: RateLimiter,
     vararg ops: Op,
 ): List<OpResult> =
-    ops.map { op ->
-        when (op) {
-            is Op.Acquire -> {
-                val started = currentTime
-                limiter.acquire(op.permits)
-                OpResult(op, started, currentTime)
+    ops
+        .map { op ->
+            when (op) {
+                is Op.Acquire -> {
+                    val started = currentTime
+                    limiter.acquire(op.permits)
+                    listOf(OpResult(op, started, currentTime))
+                }
+                is Op.TryAcquire -> {
+                    val started = currentTime
+                    val result = limiter.tryAcquire(op.permits)
+                    listOf(OpResult(op, started, currentTime, result))
+                }
+                is Op.Advance -> {
+                    val started = currentTime
+                    advanceTimeBy(op.duration)
+                    listOf(OpResult(op, started, currentTime))
+                }
+                is Op.Parallel -> {
+                    val deferred =
+                        op.acquires.map {
+                            async {
+                                val started = currentTime
+                                limiter.acquire(it)
+                                OpResult(Op.Acquire(it), started, currentTime)
+                            }
+                        }
+                    advanceUntilIdle()
+                    deferred.awaitAll()
+                }
             }
-            is Op.TryAcquire -> {
-                val started = currentTime
-                val result = limiter.tryAcquire(op.permits)
-                OpResult(op, started, currentTime, result)
-            }
-            is Op.Advance -> {
-                val started = currentTime
-                advanceTimeBy(op.duration)
-                OpResult(op, started, currentTime)
-            }
-            is Op.Parallel -> {
-                val started = currentTime
-                launch { op.acquires.forEach { limiter.acquire(it) } }
-                advanceUntilIdle()
-                OpResult(op, started, currentTime)
-            }
-        }
-    }
+        }.flatten()
