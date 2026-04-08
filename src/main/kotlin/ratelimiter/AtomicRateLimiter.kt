@@ -14,6 +14,13 @@ internal abstract class AtomicRateLimiter(
 ) : RefundableRateLimiter {
     private val bucketState = AtomicReference(initialBucket)
 
+    private data class Attempt(
+        val current: PermitBucket,
+        val refilled: PermitBucket,
+        val next: PermitBucket,
+        val delay: Duration,
+    )
+
     protected abstract fun waitDuration(
         refilled: PermitBucket,
         next: PermitBucket,
@@ -23,14 +30,11 @@ internal abstract class AtomicRateLimiter(
         require(permits > 0) { "Permits must be positive, was $permits" }
 
         while (true) {
-            val current = bucketState.load()
-            val refilled = current.refill(config)
-            val next = refilled.consume(permits, config)
-            val waitDuration = waitDuration(refilled, next)
+            val attempt = nextAttempt(permits)
 
-            if (bucketState.compareAndSet(current, next)) {
+            if (bucketState.compareAndSet(attempt.current, attempt.next)) {
                 return try {
-                    delay(waitDuration)
+                    delay(attempt.delay)
                 } catch (e: CancellationException) {
                     bucketState.updateAndFetch { bucket -> bucket.refund(permits, config) }
                     throw e
@@ -43,20 +47,17 @@ internal abstract class AtomicRateLimiter(
         require(permits > 0) { "Permits must be positive, was $permits" }
 
         while (true) {
-            val current = bucketState.load()
-            val refilled = current.refill(config)
-            val next = refilled.consume(permits, config)
-            val waitDuration = waitDuration(refilled, next)
+            val attempt = nextAttempt(permits)
 
-            if (waitDuration == Duration.ZERO) {
-                if (bucketState.compareAndSet(current, next)) {
+            if (attempt.delay == Duration.ZERO) {
+                if (bucketState.compareAndSet(attempt.current, attempt.next)) {
                     return Permit.Granted
                 }
                 continue
             }
 
-            if (bucketState.compareAndSet(current, refilled)) {
-                return Permit.Denied(retryAfter = waitDuration)
+            if (bucketState.compareAndSet(attempt.current, attempt.refilled)) {
+                return Permit.Denied(retryAfter = attempt.delay)
             }
         }
     }
@@ -69,5 +70,17 @@ internal abstract class AtomicRateLimiter(
             val next = current.refund(permits, config)
             if (bucketState.compareAndSet(current, next)) return
         }
+    }
+
+    private fun nextAttempt(permits: Int): Attempt {
+        val current = bucketState.load()
+        val refilled = current.refill(config)
+        val next = refilled.consume(permits, config)
+        return Attempt(
+            current = current,
+            refilled = refilled,
+            next = next,
+            delay = waitDuration(refilled, next),
+        )
     }
 }

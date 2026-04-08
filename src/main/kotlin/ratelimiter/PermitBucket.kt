@@ -8,6 +8,8 @@ internal data class PermitBucket(
     val refilledAt: TimeMark,
     val warmupPermitsConsumed: Double = 0.0,
 ) {
+    val deficit: Double get() = available.coerceAtMost(0.0)
+
     fun warmth(config: BucketConfig): Double =
         when (config.warmup) {
             Duration.ZERO -> 1.0
@@ -22,14 +24,24 @@ internal data class PermitBucket(
 
         if (elapsed <= Duration.ZERO) return this
 
-        val refillAmount = elapsed / refillInterval(config)
-        val newlyAvailable = available + refillAmount
-        val excessRefill = (newlyAvailable - config.capacity).coerceAtLeast(0.0)
+        val currentRefillInterval = refillInterval(config)
+        val refillAmount = elapsed / currentRefillInterval
+        val availableAfterRefill = available + refillAmount
+        val storedPermits = availableAfterRefill.coerceAtMost(config.capacity)
+        val timeUntilDebtIsRepaid = currentRefillInterval * (-available).coerceAtLeast(0.0)
+        val cooldownElapsed = (elapsed - timeUntilDebtIsRepaid).coerceAtLeast(Duration.ZERO)
+        val cooledWarmupDebt =
+            if (config.cooldownInterval == Duration.ZERO) {
+                0.0
+            } else {
+                cooldownElapsed / config.cooldownInterval
+            }
 
         return copy(
-            available = newlyAvailable.coerceAtMost(config.capacity),
+            available = storedPermits,
             refilledAt = config.timeSource.markNow(),
-            warmupPermitsConsumed = (warmupPermitsConsumed - excessRefill).coerceAtLeast(0.0),
+            // Warmup debt cools down at a constant rate, independent of current warmth.
+            warmupPermitsConsumed = (warmupPermitsConsumed - cooledWarmupDebt).coerceAtLeast(0.0),
         )
     }
 
@@ -39,8 +51,7 @@ internal data class PermitBucket(
     ): PermitBucket =
         copy(
             available = available - permits,
-            warmupPermitsConsumed =
-                (warmupPermitsConsumed + (permits - available.coerceAtLeast(0.0))).coerceIn(0.0, config.maxWarmupPermits),
+            warmupPermitsConsumed = updatedWarmupDebt(permits, config),
         )
 
     fun refund(
@@ -52,5 +63,13 @@ internal data class PermitBucket(
             available = (refilled.available + permits).coerceAtMost(config.capacity),
             warmupPermitsConsumed = (refilled.warmupPermitsConsumed - permits).coerceAtLeast(0.0),
         )
+    }
+
+    private fun updatedWarmupDebt(
+        permits: Int,
+        config: BucketConfig,
+    ): Double {
+        val consumedFromFutureCapacity = (permits - available.coerceAtLeast(0.0)).coerceAtLeast(0.0)
+        return (warmupPermitsConsumed + consumedFromFutureCapacity).coerceIn(0.0, config.maxWarmupPermits)
     }
 }

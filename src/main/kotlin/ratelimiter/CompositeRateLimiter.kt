@@ -1,6 +1,5 @@
 package ratelimiter
 
-import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 
 @Suppress("FunctionName")
@@ -15,41 +14,66 @@ internal class CompositeRateLimiterImpl(
 
     override suspend fun acquire(permits: Int) {
         require(permits > 0) { "Permits must be positive, was $permits" }
+        acquireAllOrRollback(permits)
+    }
 
+    override fun tryAcquire(permits: Int): Permit {
+        require(permits > 0) { "Permits must be positive, was $permits" }
+        return tryAcquireAllOrRollback(permits)
+    }
+
+    private suspend fun acquireAllOrRollback(permits: Int) {
         val acquired = mutableListOf<RefundableRateLimiter>()
         try {
             limiters.forEach { limiter ->
                 limiter.acquire(permits)
                 acquired.add(limiter)
             }
-        } catch (e: CancellationException) {
-            acquired.asReversed().forEach { it.refund(permits) }
+        } catch (e: Throwable) {
+            rollback(acquired, permits)
             throw e
         }
     }
 
-    override fun tryAcquire(permits: Int): Permit {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-
+    private fun tryAcquireAllOrRollback(permits: Int): Permit {
         val granted = mutableListOf<RefundableRateLimiter>()
-        var maxRetryAfter = Duration.ZERO
-        var denied = false
 
-        limiters.forEach { limiter ->
+        limiters.forEachIndexed { index, limiter ->
             when (val permit = limiter.tryAcquire(permits)) {
                 is Permit.Granted -> granted.add(limiter)
                 is Permit.Denied -> {
-                    denied = true
-                    maxRetryAfter = maxOf(maxRetryAfter, permit.retryAfter)
+                    rollback(granted, permits)
+                    return collectRetryAfterFromRemaining(
+                        remaining = limiters.drop(index + 1),
+                        permits = permits,
+                        initialRetryAfter = permit.retryAfter,
+                    )
                 }
             }
         }
 
-        return if (denied) {
-            granted.forEach { it.refund(permits) }
-            Permit.Denied(maxRetryAfter)
-        } else {
-            Permit.Granted
+        return Permit.Granted
+    }
+
+    private fun collectRetryAfterFromRemaining(
+        remaining: List<RefundableRateLimiter>,
+        permits: Int,
+        initialRetryAfter: Duration,
+    ): Permit.Denied {
+        var maxRetryAfter = initialRetryAfter
+        remaining.forEach { limiter ->
+            when (val permit = limiter.tryAcquire(permits)) {
+                is Permit.Granted -> limiter.refund(permits)
+                is Permit.Denied -> maxRetryAfter = maxOf(maxRetryAfter, permit.retryAfter)
+            }
         }
+        return Permit.Denied(maxRetryAfter)
+    }
+
+    private fun rollback(
+        acquired: List<RefundableRateLimiter>,
+        permits: Int,
+    ) {
+        acquired.asReversed().forEach { it.refund(permits) }
     }
 }

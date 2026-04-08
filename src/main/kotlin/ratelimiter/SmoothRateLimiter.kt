@@ -3,6 +3,8 @@ package ratelimiter
 import kotlin.time.Duration
 import kotlin.time.TimeSource
 
+private const val MAX_STORED_PERMITS = 1.0
+
 @Suppress("FunctionName")
 fun SmoothRateLimiter(
     permits: Int,
@@ -18,13 +20,15 @@ internal class SmoothRateLimiterImpl(
     timeSource: TimeSource,
 ) : AtomicRateLimiter(
         BucketConfig(
-            capacity = 1.0,
+            // Smooth limiters store at most one immediately-available permit and
+            // encode throughput in the refill interval instead of bucket depth.
+            capacity = MAX_STORED_PERMITS,
             timeSource = timeSource,
             stableRefillInterval = period / permits,
             warmup = warmup,
         ),
         PermitBucket(
-            available = 1.0,
+            available = MAX_STORED_PERMITS,
             refilledAt = timeSource.markNow(),
         ),
     ) {
@@ -37,8 +41,5 @@ internal class SmoothRateLimiterImpl(
     override fun waitDuration(
         refilled: PermitBucket,
         next: PermitBucket,
-    ): Duration {
-        val deficit = minOf(next.available, 0.0)
-        return refilled.refillInterval(config) * -deficit
-    }
+    ): Duration = refilled.refillInterval(config) * -next.deficit
 }

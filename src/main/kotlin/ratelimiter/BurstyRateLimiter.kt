@@ -33,8 +33,5 @@ internal class BurstyRateLimiterImpl(
     override fun waitDuration(
         refilled: PermitBucket,
         next: PermitBucket,
-    ): Duration {
-        val deficit = minOf(next.available, 0.0)
-        return next.refillInterval(config) * -deficit
-    }
+    ): Duration = next.refillInterval(config) * -next.deficit
 }
