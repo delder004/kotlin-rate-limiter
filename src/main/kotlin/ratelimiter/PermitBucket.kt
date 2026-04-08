@@ -52,7 +52,7 @@ internal data class PermitBucket(
         val refilled = refill()
         return refilled.copy(
             available = (refilled.available + permits).coerceAtMost(capacity),
-            warmupPermitsConsumed = refilled.warmupPermitsConsumed - permits,
+            warmupPermitsConsumed = (refilled.warmupPermitsConsumed - permits).coerceAtLeast(0.0),
         )
     }
 }

@@ -46,9 +46,10 @@ internal class SmoothRateLimiterImpl(
 
         while (true) {
             val current = bucketState.load()
+            val preRemovalInterval = current.refill().refillInterval
             val next = current.remove(permits)
             val deficit = if (next.available < 0) next.available else 0.0
-            val waitDuration = next.refillInterval * -deficit
+            val waitDuration = preRemovalInterval * -deficit
 
             if (bucketState.compareAndSet(current, next)) {
                 return try {
@@ -67,9 +68,10 @@ internal class SmoothRateLimiterImpl(
 
         while (true) {
             val current = bucketState.load()
+            val preRemovalInterval = current.refill().refillInterval
             val next = current.remove(permits)
             val deficit = if (next.available < 0) next.available else 0.0
-            val waitDuration = next.refillInterval * -deficit
+            val waitDuration = preRemovalInterval * -deficit
 
             if (waitDuration == Duration.ZERO) {
                 if (bucketState.compareAndSet(current, next)) {
