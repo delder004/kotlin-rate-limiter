@@ -1,6 +1,6 @@
 # SmoothRateLimiter
 
-Distributes permits evenly over time. No bursting — requests are spaced at fixed intervals. Optional warmup ramp for gradual start.
+Distributes permits evenly over time with at most one immediately-available permit. Requests are then spaced at fixed intervals. Optional warmup ramp for gradual start.
 
 ```kotlin
 fun SmoothRateLimiter(
@@ -58,6 +58,7 @@ val limiter = SmoothRateLimiter(
 
 - **Use when you need even spacing.** If the downstream service is sensitive to bursts (connection pooling, CPU spikes), smooth is the right choice. For quota-style limits ("100 per minute"), use [BurstyRateLimiter](BurstyRateLimiter.md) instead.
 - **Warmup starts at 3x the stable interval.** With `warmup = 30.seconds`, the interval between permits starts 3x slower than the steady-state rate and linearly decreases to the stable rate over the warmup period. This protects cold caches and connection pools.
-- **No permit accumulation.** Unlike bursty, idle time does not bank up permits for a later burst. The limiter always enforces even spacing regardless of how long it's been idle.
+- **No large bursts.** Unlike bursty, idle time does not bank up a large bucket of permits. The limiter stores at most one immediately-available permit, so after idle there may be one free acquire before smooth pacing resumes.
+- **Warmup applies after the stored permit.** After a long idle period, the first acquire may still be immediate, and the following intervals ramp from cold toward the stable rate over the configured warmup period.
 - **Same lock-free, lazy design.** No background coroutines, no lifecycle to manage. Shared safely across coroutines.
-- **`refund(permits)` is available.** Returns `RefundableRateLimiter`, so you can return permits if work is abandoned.
+- **`refund(permits)` is available.** The factory returns `RefundableRateLimiter`, which adds `refund()` so permits can be returned if work is abandoned.

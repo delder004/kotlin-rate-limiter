@@ -28,7 +28,9 @@ limiter.acquire(3)     // consumes 3 permits
 ### Considerations
 
 - **Cancellation-safe.** If a coroutine is cancelled while suspended in `acquire()`, the permits are returned to the limiter via CAS. No permits are leaked.
-- **Borrows from the future.** If you request more permits than are currently available, the caller proceeds immediately and the next caller pays the wait. This follows [Guava's pattern](https://github.com/google/guava/blob/master/guava/src/com/google/common/util/concurrent/RateLimiter.java) — the current request is never penalized, only subsequent ones.
+- **Current caller pays the wait.** `acquire()` reserves permits atomically, then suspends the calling coroutine for the required delay. If permits are not currently available, the caller that made the request waits before `acquire()` returns.
+- **Cancellation restores permits for future callers.** If a suspended `acquire()` is cancelled, its permits are refunded. This does not retroactively shorten delays that other waiters already computed before the cancellation.
+- **Positive permits only.** `acquire(permits)` requires `permits > 0` and throws `IllegalArgumentException` otherwise.
 - **Timeouts.** There's no built-in timeout parameter. Use the standard library:
 
 ```kotlin
@@ -60,10 +62,11 @@ when (val permit = limiter.tryAcquire()) {
 - **Non-suspending.** Can be called from non-coroutine code.
 - **Does not consume permits on denial.** Only `Granted` results consume permits.
 - **`retryAfter` is a hint.** It reflects the limiter's state at the time of the call. Other coroutines may acquire permits before you retry.
+- **Positive permits only.** `tryAcquire(permits)` requires `permits > 0` and throws `IllegalArgumentException` otherwise.
 
 ## Testing
 
-Inject `testScheduler.timeSource` to tie the limiter to virtual time:
+Inject `testTimeSource` to tie the limiter to virtual time:
 
 ```kotlin
 @Test
@@ -71,7 +74,7 @@ fun `rate limits requests`() = runTest {
     val limiter = BurstyRateLimiter(
         permits = 1,
         per = 1.seconds,
-        timeSource = testScheduler.timeSource
+        timeSource = testTimeSource
     )
 
     limiter.acquire()  // instant — 1 permit available
