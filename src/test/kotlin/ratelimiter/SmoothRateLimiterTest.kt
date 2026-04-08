@@ -252,4 +252,106 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
                 "Partial idle interval (${partialDelays[1]}) should be less than cold-start interval (${coldDelays[1]})",
             )
         }
+
+    @Test
+    fun `first warmup interval should be near cold rate`() =
+        runTest {
+            // 5 permits/sec = 200ms stable, cold = 3x stable = 600ms
+            // The first waiting interval from cold should reflect the cold rate,
+            // not a partially-warmed rate
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+            val delays = recordDelays(limiter, 3)
+            assertEquals(0L, delays[0], "First acquire should be free")
+            assertTrue(
+                delays[1] >= 500,
+                "First warmup interval should be near cold rate (600ms), was ${delays[1]}ms",
+            )
+        }
+
+    @Test
+    fun `tryAcquire retryAfter is sufficient to acquire on retry`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+            limiter.acquire()
+
+            // tryAcquire doesn't commit state, so the refill rate during the wait
+            // is the pre-removal rate — retryAfter must account for that
+            val denied = limiter.tryAcquire()
+            assertIs<Permit.Denied>(denied)
+
+            // After waiting exactly retryAfter, a retry should succeed
+            advanceTimeBy(denied.retryAfter)
+            val retry = limiter.tryAcquire()
+            assertIs<Permit.Granted>(retry, "After waiting retryAfter, permit should be granted")
+        }
+
+    @Test
+    fun `replace does not allow negative warmupPermitsConsumed`() =
+        runTest {
+            // Directly test PermitBucket: if warmupPermitsConsumed is low and
+            // replace() is called, the result should be clamped to >= 0
+            val bucket =
+                PermitBucket(
+                    available = -1.0,
+                    capacity = 1.0,
+                    timeSource = testTimeSource,
+                    refilledAt = testTimeSource.markNow(),
+                    stableRefillInterval = 200.milliseconds,
+                    warmup = 2.seconds,
+                    warmupPermitsConsumed = 0.5,
+                )
+            val restored = bucket.replace(1)
+            assertTrue(
+                restored.warmupPermitsConsumed >= 0.0,
+                "warmupPermitsConsumed should not go negative, was ${restored.warmupPermitsConsumed}",
+            )
+        }
+
+    @Test
+    fun `multi-permit acquire from cold uses cold interval`() =
+        runTest {
+            // 5 permits/sec = 200ms stable, cold = 600ms, 2s warmup
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+
+            // acquire(3) from cold: deficit = 2, should wait at the cold rate
+            val before = currentTime
+            limiter.acquire(3)
+            val delay = currentTime - before
+            assertTrue(
+                delay >= 1000,
+                "Multi-permit acquire from cold should reflect cold interval (~1200ms), was ${delay}ms",
+            )
+        }
+
+    @Test
+    fun `cancellation during warmup preserves correct warmup delay`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+
+            // First acquire is free, advances warmup to wpc=1
+            limiter.acquire()
+
+            // Second acquire will wait — cancel it mid-delay
+            val job = launch { limiter.acquire() }
+            runCurrent()
+            job.cancel()
+            runCurrent()
+
+            // After cancel, state restored to wpc=1, warmth=0.2, interval=520ms
+            // The next wait should reflect the pre-removal cold-ish interval
+            val before = currentTime
+            limiter.acquire()
+            assertTrue(
+                currentTime - before >= 500,
+                "Post-cancellation warmup delay should reflect cold interval, was ${currentTime - before}ms",
+            )
+        }
+
+    @Test
+    fun `warmup zero disables warmup`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = Duration.ZERO, testTimeSource)
+            val delays = recordDelays(limiter, 4)
+            assertEquals(listOf(0L, 200L, 200L, 200L), delays)
+        }
 }
