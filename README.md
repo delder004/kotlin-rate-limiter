@@ -9,8 +9,8 @@ There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460)
 This library is:
 
 - **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` and `AtomicReference`, no Java concurrency primitives.
-- **Testable with virtual time** — inject `testScheduler.timeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
-- **Focused** — two functions, one interface. No framework, no annotations, no configuration files.
+- **Testable with virtual time** — inject `testTimeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
+- **Focused** — small API surface. No framework, no annotations, no configuration files.
 - **Client-side** — designed for throttling your outbound API calls, not for protecting your server endpoints.
 
 ## Installation
@@ -52,7 +52,9 @@ sealed interface Permit {
 }
 ```
 
-`acquire()` suspends until permits are available. `tryAcquire()` returns immediately with `Granted` or `Denied(retryAfter)`.
+`acquire()` reserves permits and suspends the current caller until they are available. `tryAcquire()` returns immediately with `Granted` or `Denied(retryAfter)`.
+
+Both functions require `permits > 0`.
 
 Need a timeout? Use the standard library:
 
@@ -78,7 +80,7 @@ val limiter = BurstyRateLimiter(
 
 #### SmoothRateLimiter
 
-Distributes permits evenly over time. If you configure 10 per second, permits are released every 100ms. No bursting. Use when you want to create even load on a downstream service.
+Distributes permits evenly over time with at most one immediately-available permit. If you configure 10 per second, permits are released every 100ms after that. Use when you want to create even load on a downstream service.
 
 ```kotlin
 val limiter = SmoothRateLimiter(
@@ -91,7 +93,7 @@ val limiter = SmoothRateLimiter(
 
 #### CompositeRateLimiter
 
-Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. Use for APIs with layered limits.
+Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. `tryAcquire()` returns the longest `retryAfter` among denying children. Use for APIs with layered limits.
 
 ```kotlin
 val limiter = CompositeRateLimiter(
@@ -197,7 +199,7 @@ urlFlow
 
 ## Testing
 
-The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testScheduler.timeSource` to tie the rate limiter's clock to virtual time:
+The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testTimeSource` to tie the rate limiter's clock to virtual time:
 
 ```kotlin
 @Test
@@ -205,7 +207,7 @@ fun `acquire suspends when permits exhausted`() = runTest {
     val limiter = BurstyRateLimiter(
         permits = 2,
         per = 1.seconds,
-        timeSource = testScheduler.timeSource
+        timeSource = testTimeSource
     )
 
     limiter.acquire()  // instant
