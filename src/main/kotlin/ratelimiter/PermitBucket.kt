@@ -2,56 +2,54 @@ package ratelimiter
 
 import kotlin.time.Duration
 import kotlin.time.TimeMark
-import kotlin.time.TimeSource
 
 internal data class PermitBucket(
     val available: Double,
-    val capacity: Double,
-    val timeSource: TimeSource,
     val refilledAt: TimeMark,
-    val stableRefillInterval: Duration,
-    val warmup: Duration = Duration.ZERO,
     val warmupPermitsConsumed: Double = 0.0,
 ) {
-    val coldRefillInterval: Duration = stableRefillInterval * 3
-    val maxWarmupPermits = warmup * 2.0 / (coldRefillInterval + stableRefillInterval)
-    val warmth: Double get() =
-        when (warmup) {
+    fun warmth(config: BucketConfig): Double =
+        when (config.warmup) {
             Duration.ZERO -> 1.0
-            else -> (warmupPermitsConsumed / maxWarmupPermits).coerceIn(0.0, 1.0)
+            else -> (warmupPermitsConsumed / config.maxWarmupPermits).coerceIn(0.0, 1.0)
         }
-    val refillInterval: Duration get() {
-        return coldRefillInterval + (stableRefillInterval - coldRefillInterval) * warmth
-    }
 
-    fun refill(): PermitBucket {
+    fun refillInterval(config: BucketConfig): Duration =
+        config.coldRefillInterval + (config.stableRefillInterval - config.coldRefillInterval) * warmth(config)
+
+    fun refill(config: BucketConfig): PermitBucket {
         val elapsed = refilledAt.elapsedNow()
 
         if (elapsed <= Duration.ZERO) return this
 
-        val refillAmount = elapsed / refillInterval
+        val refillAmount = elapsed / refillInterval(config)
         val newlyAvailable = available + refillAmount
-        val excessRefill = (newlyAvailable - capacity).coerceAtLeast(0.0)
+        val excessRefill = (newlyAvailable - config.capacity).coerceAtLeast(0.0)
 
-        return this.copy(
-            available = newlyAvailable.coerceAtMost(capacity),
-            refilledAt = timeSource.markNow(),
+        return copy(
+            available = newlyAvailable.coerceAtMost(config.capacity),
+            refilledAt = config.timeSource.markNow(),
             warmupPermitsConsumed = (warmupPermitsConsumed - excessRefill).coerceAtLeast(0.0),
         )
     }
 
-    fun remove(permits: Int): PermitBucket {
-        val refilled = refill()
-        return refilled.copy(
-            available = refilled.available - permits,
-            warmupPermitsConsumed = (refilled.warmupPermitsConsumed + permits).coerceAtMost(maxWarmupPermits),
+    fun consume(
+        permits: Int,
+        config: BucketConfig,
+    ): PermitBucket =
+        copy(
+            available = available - permits,
+            warmupPermitsConsumed =
+                (warmupPermitsConsumed + (permits - available.coerceAtLeast(0.0))).coerceIn(0.0, config.maxWarmupPermits),
         )
-    }
 
-    fun replace(permits: Int): PermitBucket {
-        val refilled = refill()
+    fun refund(
+        permits: Int,
+        config: BucketConfig,
+    ): PermitBucket {
+        val refilled = refill(config)
         return refilled.copy(
-            available = (refilled.available + permits).coerceAtMost(capacity),
+            available = (refilled.available + permits).coerceAtMost(config.capacity),
             warmupPermitsConsumed = (refilled.warmupPermitsConsumed - permits).coerceAtLeast(0.0),
         )
     }

@@ -1,10 +1,5 @@
 package ratelimiter
 
-import kotlinx.coroutines.delay
-import kotlin.concurrent.atomics.AtomicReference
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
-import kotlin.concurrent.atomics.updateAndFetch
-import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 import kotlin.time.TimeSource
 
@@ -14,83 +9,36 @@ fun SmoothRateLimiter(
     per: Duration,
     warmup: Duration = Duration.ZERO,
     timeSource: TimeSource = TimeSource.Monotonic,
-): RateLimiter = SmoothRateLimiterImpl(permits, per, warmup, timeSource)
+): RefundableRateLimiter = SmoothRateLimiterImpl(permits, per, warmup, timeSource)
 
-@OptIn(ExperimentalAtomicApi::class)
 internal class SmoothRateLimiterImpl(
-    private val permits: Int,
-    private val period: Duration,
-    private val warmup: Duration,
-    private val timeSource: TimeSource,
-) : RefundableRateLimiter {
+    permits: Int,
+    period: Duration,
+    warmup: Duration,
+    timeSource: TimeSource,
+) : AtomicRateLimiter(
+        BucketConfig(
+            capacity = 1.0,
+            timeSource = timeSource,
+            stableRefillInterval = period / permits,
+            warmup = warmup,
+        ),
+        PermitBucket(
+            available = 1.0,
+            refilledAt = timeSource.markNow(),
+        ),
+    ) {
     init {
         require(permits > 0) { "Permits must be positive, was $permits" }
         require(period > Duration.ZERO) { "Period must be positive, was $period" }
         require(warmup >= Duration.ZERO) { "Warmup can't be negative, was $warmup" }
     }
 
-    private val bucketState =
-        AtomicReference(
-            PermitBucket(
-                available = 1.0,
-                capacity = 1.0,
-                timeSource = timeSource,
-                refilledAt = timeSource.markNow(),
-                stableRefillInterval = period / permits,
-                warmup = warmup,
-            ),
-        )
-
-    override suspend fun acquire(permits: Int) {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-
-        while (true) {
-            val current = bucketState.load()
-            val preRemovalInterval = current.refill().refillInterval
-            val next = current.remove(permits)
-            val deficit = if (next.available < 0) next.available else 0.0
-            val waitDuration = preRemovalInterval * -deficit
-
-            if (bucketState.compareAndSet(current, next)) {
-                return try {
-                    delay(waitDuration)
-                } catch (e: CancellationException) {
-                    bucketState.updateAndFetch { bucket -> bucket.replace(permits) }
-                    throw e
-                }
-            }
-            // CAS failed — another coroutine updated state, retry
-        }
-    }
-
-    override fun tryAcquire(permits: Int): Permit {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-
-        while (true) {
-            val current = bucketState.load()
-            val preRemovalInterval = current.refill().refillInterval
-            val next = current.remove(permits)
-            val deficit = if (next.available < 0) next.available else 0.0
-            val waitDuration = preRemovalInterval * -deficit
-
-            if (waitDuration == Duration.ZERO) {
-                if (bucketState.compareAndSet(current, next)) {
-                    return Permit.Granted
-                }
-                // CAS failed — another coroutine updated state, retry
-            } else {
-                return Permit.Denied(retryAfter = waitDuration)
-            }
-        }
-    }
-
-    override fun refund(permits: Int) {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-
-        while (true) {
-            val current = bucketState.load()
-            val next = current.replace(permits)
-            if (bucketState.compareAndSet(current, next)) return
-        }
+    override fun waitDuration(
+        refilled: PermitBucket,
+        next: PermitBucket,
+    ): Duration {
+        val deficit = minOf(next.available, 0.0)
+        return refilled.refillInterval(config) * -deficit
     }
 }

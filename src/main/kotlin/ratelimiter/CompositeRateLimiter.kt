@@ -4,17 +4,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 
 @Suppress("FunctionName")
-fun CompositeRateLimiter(vararg limiters: RateLimiter): RateLimiter {
-    require(limiters.isNotEmpty()) { "There must be at least one rateLimiter" }
-    val refundableLimiters =
-        limiters.map {
-            require(it is RefundableRateLimiter) {
-                "CompositeRateLimiter requires limiters that support refunds"
-            }
-            it
-        }
-    return CompositeRateLimiterImpl(refundableLimiters)
-}
+fun CompositeRateLimiter(vararg limiters: RefundableRateLimiter): RateLimiter = CompositeRateLimiterImpl(limiters.toList())
 
 internal class CompositeRateLimiterImpl(
     private val limiters: List<RefundableRateLimiter>,

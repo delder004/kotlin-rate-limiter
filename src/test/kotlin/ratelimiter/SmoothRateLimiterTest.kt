@@ -254,6 +254,23 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
         }
 
     @Test
+    fun `partial idle cools halfway rather than resetting fully cold`() =
+        runTest {
+            val limiter = SmoothRateLimiter(5, 1.seconds, warmup = 2.seconds, testTimeSource)
+
+            recordDelays(limiter, 30)
+            advanceTimeBy(1.seconds)
+
+            val delays = recordDelays(limiter, 3)
+
+            assertEquals(0L, delays[0], "First acquire after idle should still use the stored permit")
+            assertTrue(
+                delays[1] in 390L..410L,
+                "After half the warmup idle, second interval should be near 400ms, was ${delays[1]}ms",
+            )
+        }
+
+    @Test
     fun `first warmup interval should be near cold rate`() =
         runTest {
             // 5 permits/sec = 200ms stable, cold = 3x stable = 600ms
@@ -289,18 +306,21 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
     fun `replace does not allow negative warmupPermitsConsumed`() =
         runTest {
             // Directly test PermitBucket: if warmupPermitsConsumed is low and
-            // replace() is called, the result should be clamped to >= 0
+            // refund() is called, the result should be clamped to >= 0
+            val config =
+                BucketConfig(
+                    capacity = 1.0,
+                    timeSource = testTimeSource,
+                    stableRefillInterval = 200.milliseconds,
+                    warmup = 2.seconds,
+                )
             val bucket =
                 PermitBucket(
                     available = -1.0,
-                    capacity = 1.0,
-                    timeSource = testTimeSource,
                     refilledAt = testTimeSource.markNow(),
-                    stableRefillInterval = 200.milliseconds,
-                    warmup = 2.seconds,
                     warmupPermitsConsumed = 0.5,
                 )
-            val restored = bucket.replace(1)
+            val restored = bucket.refund(1, config)
             assertTrue(
                 restored.warmupPermitsConsumed >= 0.0,
                 "warmupPermitsConsumed should not go negative, was ${restored.warmupPermitsConsumed}",

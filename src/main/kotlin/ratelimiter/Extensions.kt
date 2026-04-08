@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 suspend fun <T> RateLimiter.withPermit(
-    permits: Int,
+    permits: Int = 1,
     block: suspend () -> T,
 ): T {
     acquire(permits)
