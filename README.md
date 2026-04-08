@@ -1,5 +1,9 @@
 # kotlin-rate-limiter
 
+[![Check](https://github.com/delder004/kotlin-rate-limiter/actions/workflows/check.yml/badge.svg)](https://github.com/delder004/kotlin-rate-limiter/actions/workflows/check.yml)
+[![License](https://img.shields.io/github/license/delder004/kotlin-rate-limiter)](LICENSE)
+[![Kotlin](https://img.shields.io/badge/kotlin-2.2.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+
 A coroutine-native rate limiter for Kotlin. Controls the pace of outbound requests to external APIs using suspending functions — no threads blocked, no timers running, no framework dependencies.
 
 `kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 21.

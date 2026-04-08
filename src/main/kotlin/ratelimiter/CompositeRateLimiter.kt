@@ -2,6 +2,14 @@ package ratelimiter
 
 import kotlin.time.Duration
 
+/**
+ * Creates a limiter that acquires permits from every supplied [limiters].
+ *
+ * A request succeeds only when all delegates can satisfy it. If one delegate
+ * fails, any already-acquired permits are refunded before returning.
+ *
+ * @param limiters delegate limiters that all participate in each acquisition
+ */
 @Suppress("FunctionName")
 fun CompositeRateLimiter(vararg limiters: RefundableRateLimiter): RateLimiter = CompositeRateLimiterImpl(limiters.toList())
 
