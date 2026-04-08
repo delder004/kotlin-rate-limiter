@@ -28,7 +28,7 @@ This library is:
 
 ## Documentation
 
-- API docs: [`docs/`](docs/)
+- Guides: [`docs/`](docs/)
 - Core interface: [`docs/RateLimiter.md`](docs/RateLimiter.md)
 - Bursty limiter: [`docs/BurstyRateLimiter.md`](docs/BurstyRateLimiter.md)
 - Smooth limiter: [`docs/SmoothRateLimiter.md`](docs/SmoothRateLimiter.md)
@@ -78,7 +78,7 @@ sealed interface Permit {
 
 Both functions require `permits > 0`.
 
-Need a timeout? Use the standard library:
+Need a timeout? Use `kotlinx.coroutines`:
 
 ```kotlin
 withTimeout(3.seconds) {
@@ -144,6 +144,8 @@ addressFlow
     .map { address -> api.fetch(address) }
     .collect { save(it) }
 ```
+
+`withPermit {}` acquires before running the block, but does not automatically refund permits if the block fails or is cancelled.
 
 ## Usage Examples
 
@@ -269,7 +271,7 @@ val noOpLimiter = object : RateLimiter {
 
 ### Why `acquire()` + `tryAcquire()` and not `tryAcquire(timeout)`?
 
-`acquire()` suspends, so you compose timeouts with the standard `withTimeout {}` / `withTimeoutOrNull {}` from kotlinx.coroutines. No need to reinvent what already exists. `tryAcquire()` exists for the non-suspending "check and decide" case where you want the `retryAfter` hint.
+`acquire()` suspends, so you compose timeouts with `withTimeout {}` / `withTimeoutOrNull {}` from `kotlinx.coroutines`. No need to reinvent what already exists. `tryAcquire()` exists for the non-suspending "check and decide" case where you want the `retryAfter` hint.
 
 This matches the convention established by Guava's `RateLimiter` and resilience4j.
 
