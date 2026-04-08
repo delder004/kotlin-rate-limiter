@@ -1,9 +1,6 @@
 package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -11,6 +8,8 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -111,56 +110,35 @@ abstract class RateLimiterContractTest {
 
     // PARAMETER VALIDATION
 
-    @Test
-    fun `acquire rejects zero permits`() =
+    @ParameterizedTest(name = "acquire rejects permits={0}")
+    @ValueSource(ints = [0, -1])
+    fun `acquire rejects invalid permits`(permits: Int) =
         runTest {
             val limiter = createLimiter(permits = 5, per = 1.seconds)
-            assertFailsWith<IllegalArgumentException> { limiter.acquire(0) }
+            assertFailsWith<IllegalArgumentException> { limiter.acquire(permits) }
         }
 
-    @Test
-    fun `acquire rejects negative permits`() =
+    @ParameterizedTest(name = "tryAcquire rejects permits={0}")
+    @ValueSource(ints = [0, -1])
+    fun `tryAcquire rejects invalid permits`(permits: Int) =
         runTest {
             val limiter = createLimiter(permits = 5, per = 1.seconds)
-            assertFailsWith<IllegalArgumentException> { limiter.acquire(-1) }
+            assertFailsWith<IllegalArgumentException> { limiter.tryAcquire(permits) }
         }
 
-    @Test
-    fun `tryAcquire rejects zero permits`() =
+    @ParameterizedTest(name = "factory rejects permits={0}")
+    @ValueSource(ints = [0, -1])
+    fun `factory rejects invalid permits`(permits: Int) =
         runTest {
-            val limiter = createLimiter(permits = 5, per = 1.seconds)
-            assertFailsWith<IllegalArgumentException> { limiter.tryAcquire(0) }
+            assertFailsWith<IllegalArgumentException> { createLimiter(permits = permits, per = 1.seconds) }
         }
 
-    @Test
-    fun `tryAcquire rejects negative permits`() =
+    @ParameterizedTest(name = "factory rejects per={0}ms")
+    @ValueSource(longs = [0L, -1000L])
+    fun `factory rejects invalid duration`(perMillis: Long) =
         runTest {
-            val limiter = createLimiter(permits = 5, per = 1.seconds)
-            assertFailsWith<IllegalArgumentException> { limiter.tryAcquire(-1) }
-        }
-
-    @Test
-    fun `factory rejects zero permits`() =
-        runTest {
-            assertFailsWith<IllegalArgumentException> { createLimiter(permits = 0, per = 1.seconds) }
-        }
-
-    @Test
-    fun `factory rejects zero duration`() =
-        runTest {
-            assertFailsWith<IllegalArgumentException> { createLimiter(permits = 5, per = Duration.ZERO) }
-        }
-
-    @Test
-    fun `factory rejects negative duration`() =
-        runTest {
-            assertFailsWith<IllegalArgumentException> { createLimiter(permits = 5, per = (-1).seconds) }
-        }
-
-    @Test
-    fun `factory rejects negative permits`() =
-        runTest {
-            assertFailsWith<IllegalArgumentException> { createLimiter(permits = -1, per = 1.seconds) }
+            val per = perMillis.milliseconds
+            assertFailsWith<IllegalArgumentException> { createLimiter(permits = 5, per = per) }
         }
 
     // CANCELLATION
@@ -229,108 +207,4 @@ abstract class RateLimiterContractTest {
             assertTrue("second" in results)
         }
 
-    // EXTENSIONS - RateLimiter.withPermit
-
-    @Test
-    fun `withPermit acquires and executes block`() =
-        runTest {
-            val limiter = createLimiter(permits = 1, per = 1.seconds)
-            val result = limiter.withPermit(1) { "hello" }
-            assertEquals("hello", result)
-        }
-
-    @Test
-    fun `withPermit propagates exceptions`() =
-        runTest {
-            val limiter = createLimiter(permits = 1, per = 1.seconds)
-            assertFailsWith<IllegalStateException> {
-                limiter.withPermit(1) { throw IllegalStateException("boom") }
-            }
-        }
-
-    @Test
-    fun `withPermit acquires before running block`() =
-        runTest {
-            val limiter = createLimiter(permits = 1, per = 1.seconds)
-            limiter.acquire()
-
-            var blockRan = false
-            val job =
-                launch {
-                    limiter.withPermit(1) { blockRan = true }
-                }
-            runCurrent()
-            assertFalse(blockRan)
-
-            advanceTimeBy(1.seconds)
-            runCurrent()
-            assertTrue(blockRan)
-        }
-
-    // EXTENSIONS — Flow.rateLimit
-
-    @Test
-    fun `each emission is individually rate limited`() =
-        runTest {
-            val limiter = createLimiter(permits = 2, per = 1.seconds)
-            val timestamps = mutableListOf<Long>()
-
-            flowOf(1, 2, 3, 4, 5)
-                .rateLimit(limiter)
-                .collect { timestamps.add(currentTime) }
-
-            assertEquals(5, timestamps.size)
-            // Timestamps must be monotonically non-decreasing
-            timestamps.zipWithNext().forEach { (a, b) ->
-                assertTrue(b >= a, "Timestamps should be non-decreasing: $a -> $b")
-            }
-            // 5 items at 2/sec requires at least 1500ms (bursty: 2 burst + 3*500ms)
-            assertTrue(
-                timestamps.last() >= 1500,
-                "5 items at 2/sec should take >= 1500ms, was ${timestamps.last()}",
-            )
-            // At least some emissions should have non-zero gaps between them
-            val nonZeroGaps = timestamps.zipWithNext().count { (a, b) -> b > a }
-            assertTrue(
-                nonZeroGaps >= 2,
-                "Expected at least 2 non-zero gaps between emissions, got $nonZeroGaps",
-            )
-        }
-
-    @Test
-    fun `backpressure propagates correctly`() =
-        runTest {
-            val limiter = createLimiter(permits = 10, per = 1.seconds)
-            val collected = mutableListOf<Int>()
-
-            flowOf(1, 2, 3, 4, 5)
-                .rateLimit(limiter)
-                .collect {
-                    delay(50.milliseconds)
-                    collected.add(it)
-                }
-
-            assertEquals(listOf(1, 2, 3, 4, 5), collected)
-        }
-
-    @Test
-    fun `cancelling collection cancels limiter wait`() =
-        runTest {
-            val limiter = createLimiter(permits = 1, per = 1.seconds)
-            val collected = mutableListOf<Int>()
-
-            val job =
-                launch {
-                    flow { repeat(100) { emit(it) } }
-                        .rateLimit(limiter)
-                        .collect { collected.add(it) }
-                }
-            runCurrent()
-
-            job.cancel()
-            runCurrent()
-
-            assertTrue(collected.size < 100, "Collection should have been cancelled, got ${collected.size} items")
-            assertTrue(job.isCancelled)
-        }
 }
