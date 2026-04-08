@@ -34,6 +34,14 @@ This library is:
 - Smooth limiter: [`docs/SmoothRateLimiter.md`](docs/SmoothRateLimiter.md)
 - Composite limiter: [`docs/CompositeRateLimiter.md`](docs/CompositeRateLimiter.md)
 - Extensions: [`docs/Extensions.md`](docs/Extensions.md)
+- Ktor client plugin example: [`docs/KtorClientPluginExample.md`](docs/KtorClientPluginExample.md)
+- HTTP client wrapper: [`docs/RateLimitedHttpClient.md`](docs/RateLimitedHttpClient.md)
+
+## Examples
+
+First-class examples live in [`src/examples/kotlin`](src/examples/kotlin).
+
+- Ktor client plugin for route-based rate limiting: [`src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt`](src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt)
 
 ## Installation
 

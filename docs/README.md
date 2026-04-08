@@ -9,3 +9,4 @@ API reference for `kotlin-rate-limiter`.
 | [SmoothRateLimiter](SmoothRateLimiter.md) | Even distribution — optional warmup ramp |
 | [CompositeRateLimiter](CompositeRateLimiter.md) | Combine multiple limiters — all must grant |
 | [Extensions](Extensions.md) | `withPermit {}` and `Flow.rateLimit()` |
+| [KtorClientPluginExample](KtorClientPluginExample.md) | Example Ktor client plugin for route-based rate limiting |
