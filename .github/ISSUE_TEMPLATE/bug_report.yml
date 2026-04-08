@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible problem with the library
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please provide a minimal reproduction when possible.
+  - type: input
+    id: version
+    attributes:
+      label: Library version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: kotlin_version
+    attributes:
+      label: Kotlin version
+      placeholder: 2.2.20
+    validations:
+      required: true
+  - type: input
+    id: jdk_version
+    attributes:
+      label: JDK version
+      placeholder: 21
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include code, steps, or a sample project if available.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

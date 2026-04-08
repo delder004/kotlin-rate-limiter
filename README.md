@@ -2,6 +2,8 @@
 
 A coroutine-native rate limiter for Kotlin. Controls the pace of outbound requests to external APIs using suspending functions — no threads blocked, no timers running, no framework dependencies.
 
+`kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 21.
+
 ## Why?
 
 There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460) on kotlinx.coroutines (since 2018!) requesting a suspendable rate limiter. A [PR was submitted and closed](https://github.com/Kotlin/kotlinx.coroutines/pull/2799) without being merged. The existing options are either Java-based wrappers (resilience4j, Bucket4j) that don't integrate with virtual time testing, or part of large resilience frameworks where you pull in the whole kitchen sink for one primitive.
@@ -12,6 +14,22 @@ This library is:
 - **Testable with virtual time** — inject `testTimeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
 - **Focused** — small API surface. No framework, no annotations, no configuration files.
 - **Client-side** — designed for throttling your outbound API calls, not for protecting your server endpoints.
+
+## Project Status
+
+- Current version: `0.1.0`
+- Stability: early public release
+- Target platform: Kotlin/JVM
+- Java toolchain: JDK 21
+
+## Documentation
+
+- API docs: [`docs/`](docs/)
+- Core interface: [`docs/RateLimiter.md`](docs/RateLimiter.md)
+- Bursty limiter: [`docs/BurstyRateLimiter.md`](docs/BurstyRateLimiter.md)
+- Smooth limiter: [`docs/SmoothRateLimiter.md`](docs/SmoothRateLimiter.md)
+- Composite limiter: [`docs/CompositeRateLimiter.md`](docs/CompositeRateLimiter.md)
+- Extensions: [`docs/Extensions.md`](docs/Extensions.md)
 
 ## Installation
 
@@ -78,6 +96,8 @@ val limiter = BurstyRateLimiter(
 )
 ```
 
+Returns `RefundableRateLimiter`, which also exposes `refund(permits)` when reserved work is abandoned before completion.
+
 #### SmoothRateLimiter
 
 Distributes permits evenly over time with at most one immediately-available permit. If you configure 10 per second, permits are released every 100ms after that. Use when you want to create even load on a downstream service.
@@ -91,6 +111,8 @@ val limiter = SmoothRateLimiter(
 )
 ```
 
+Returns `RefundableRateLimiter`, which also exposes `refund(permits)` when reserved work is abandoned before completion.
+
 #### CompositeRateLimiter
 
 Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. `tryAcquire()` returns the longest `retryAfter` among denying children. Use for APIs with layered limits.
@@ -101,6 +123,8 @@ val limiter = CompositeRateLimiter(
     BurstyRateLimiter(permits = 1000, per = 24.hours)
 )
 ```
+
+Partial grants are rolled back automatically if a later limiter denies the same request.
 
 ### Extensions
 
@@ -256,6 +280,14 @@ The limiter calculates how many permits *would have been* added since the last a
 ### Why client-side only?
 
 Server-side rate limiting (protecting your API from callers) is a different problem with different tools — Ktor has a built-in plugin, nginx handles it at the infrastructure level. Client-side rate limiting (throttling your outbound calls) is the underserved use case where developers are rolling their own `while(isActive) { delay() }` loops.
+
+## Community
+
+- Questions, bug reports, and feature requests: open a GitHub issue
+- Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Acknowledgments
 
