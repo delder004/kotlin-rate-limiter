@@ -22,7 +22,7 @@ internal class SmoothRateLimiterImpl(
     private val period: Duration,
     private val warmup: Duration,
     private val timeSource: TimeSource,
-) : RateLimiter {
+) : RefundableRateLimiter {
     init {
         require(permits > 0) { "Permits must be positive, was $permits" }
         require(period > Duration.ZERO) { "Period must be positive, was $period" }
@@ -81,6 +81,16 @@ internal class SmoothRateLimiterImpl(
             } else {
                 return Permit.Denied(retryAfter = waitDuration)
             }
+        }
+    }
+
+    override fun refund(permits: Int) {
+        require(permits > 0) { "Permits must be positive, was $permits" }
+
+        while (true) {
+            val current = bucketState.load()
+            val next = current.replace(permits)
+            if (bucketState.compareAndSet(current, next)) return
         }
     }
 }

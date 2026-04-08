@@ -103,6 +103,46 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
         }
 
     @Test
+    fun `tryAcquire denied does not consume permits from other limiters`() =
+        runTest {
+            val fast = BurstyRateLimiter(2, 1.seconds, testTimeSource)
+            val slow = BurstyRateLimiter(1, 1.seconds, testTimeSource)
+            val limiter = CompositeRateLimiter(fast, slow)
+
+            // Exhaust only the slow limiter so composite tryAcquire must deny.
+            slow.acquire()
+
+            val denied = limiter.tryAcquire()
+            assertIs<Permit.Denied>(denied)
+
+            // If composite tryAcquire is atomic, fast limiter should still have both permits.
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertIs<Permit.Denied>(fast.tryAcquire())
+        }
+
+    @Test
+    fun `acquire cancellation does not consume permits from already-acquired limiters`() =
+        runTest {
+            val fast = BurstyRateLimiter(2, 1.seconds, testTimeSource)
+            val slow = BurstyRateLimiter(1, 1.seconds, testTimeSource)
+            val limiter = CompositeRateLimiter(fast, slow)
+
+            // Exhaust slow so composite acquire can consume fast then suspend on slow.
+            slow.acquire()
+
+            val job = launch { limiter.acquire() }
+            runCurrent()
+            job.cancel()
+            runCurrent()
+
+            // If acquire rollback is atomic, fast limiter should still have both permits.
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertIs<Permit.Denied>(fast.tryAcquire())
+        }
+
+    @Test
     fun `both limiters consume permits on acquire`() =
         runTest {
             val a = BurstyRateLimiter(2, 1.seconds, testTimeSource)
