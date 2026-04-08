@@ -18,7 +18,7 @@ This library is:
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ratelimiter:kotlin-rate-limiter:0.1.0")
+    implementation("io.github.delder004:kotlin-rate-limiter:0.1.0")
 }
 ```
 
@@ -84,7 +84,7 @@ Distributes permits evenly over time. If you configure 10 per second, permits ar
 val limiter = SmoothRateLimiter(
     permits = 10,
     per = 1.seconds,
-    warmupDuration = Duration.ZERO,       // optional ramp-up period
+    warmup = Duration.ZERO,               // optional ramp-up period
     timeSource = TimeSource.Monotonic
 )
 ```
@@ -263,4 +263,4 @@ Server-side rate limiting (protecting your API from callers) is a different prob
 
 ## License
 
-MIT
+Apache 2.0
