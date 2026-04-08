@@ -15,18 +15,32 @@ import ratelimiter.*
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
+data class RouteRule(
+    val prefix: String,
+    val limiter: RefundableRateLimiter,
+)
+
 class RateLimitedClient(
     private val client: HttpClient = HttpClient(),
-    private val defaultLimiter: RateLimiter = BurstyRateLimiter(permits = 10, per = 1.seconds),
-    private val routeLimiters: Map<String, RateLimiter> = emptyMap(),
+    private val defaultLimiter: RefundableRateLimiter? = BurstyRateLimiter(permits = 100, per = 1.minutes),
+    private val routeLimiters: List<RouteRule> = emptyList(),
 ) {
     suspend fun <T> request(route: String, block: suspend HttpClient.() -> T): T {
-        val limiter = routeLimiters.entries
-            .firstOrNull { route.startsWith(it.key) }
-            ?.value
-            ?: defaultLimiter
+        val routeLimiter = routeLimiters
+            .firstOrNull { route == it.prefix || route.startsWith("${it.prefix}/") }
+            ?.limiter
 
-        return limiter.withPermit { client.block() }
+        val limiter = when {
+            defaultLimiter != null && routeLimiter != null -> CompositeRateLimiter(defaultLimiter, routeLimiter)
+            routeLimiter != null -> routeLimiter
+            else -> defaultLimiter
+        }
+
+        return if (limiter == null) {
+            client.block()
+        } else {
+            limiter.withPermit { client.block() }
+        }
     }
 }
 ```
@@ -35,9 +49,10 @@ class RateLimitedClient(
 
 ```kotlin
 val client = RateLimitedClient(
-    routeLimiters = mapOf(
-        "/search" to SmoothRateLimiter(permits = 2, per = 1.seconds),
-        "/uploads" to BurstyRateLimiter(permits = 5, per = 1.minutes),
+    defaultLimiter = BurstyRateLimiter(permits = 100, per = 1.minutes),
+    routeLimiters = listOf(
+        RouteRule("/search", SmoothRateLimiter(permits = 2, per = 1.seconds)),
+        RouteRule("/uploads", BurstyRateLimiter(permits = 5, per = 1.minutes)),
     ),
 )
 
@@ -50,6 +65,8 @@ val upload = client.request("/uploads") {
 }
 ```
 
+In this shape, `/search` requests must satisfy both the global `100/minute` limiter and the route-specific `2/second` limiter. Unmatched routes fall back to the global limiter only.
+
 Prefix matching is simpler, faster, and harder to get wrong. Choose this unless you have a specific reason to need regex.
 
 ## Using Regex Matching
@@ -57,18 +74,32 @@ Prefix matching is simpler, faster, and harder to get wrong. Choose this unless 
 Use when routes share a prefix but need different limits. For example, `/users` (list all) vs `/users/\d+` (single user) would both match the same prefix, but regex lets you distinguish them.
 
 ```kotlin
+data class RegexRouteRule(
+    val pattern: Regex,
+    val limiter: RefundableRateLimiter,
+)
+
 class RateLimitedClient(
     private val client: HttpClient = HttpClient(),
-    private val defaultLimiter: RateLimiter = BurstyRateLimiter(permits = 10, per = 1.seconds),
-    private val routeLimiters: List<Pair<Regex, RateLimiter>> = emptyList(),
+    private val defaultLimiter: RefundableRateLimiter? = BurstyRateLimiter(permits = 100, per = 1.minutes),
+    private val routeLimiters: List<RegexRouteRule> = emptyList(),
 ) {
     suspend fun <T> request(route: String, block: suspend HttpClient.() -> T): T {
-        val limiter = routeLimiters
-            .firstOrNull { (pattern, _) -> pattern.matches(route) }
-            ?.second
-            ?: defaultLimiter
+        val routeLimiter = routeLimiters
+            .firstOrNull { it.pattern.matches(route) }
+            ?.limiter
 
-        return limiter.withPermit { client.block() }
+        val limiter = when {
+            defaultLimiter != null && routeLimiter != null -> CompositeRateLimiter(defaultLimiter, routeLimiter)
+            routeLimiter != null -> routeLimiter
+            else -> defaultLimiter
+        }
+
+        return if (limiter == null) {
+            client.block()
+        } else {
+            limiter.withPermit { client.block() }
+        }
     }
 }
 ```
@@ -77,10 +108,11 @@ class RateLimitedClient(
 
 ```kotlin
 val client = RateLimitedClient(
+    defaultLimiter = BurstyRateLimiter(permits = 100, per = 1.minutes),
     routeLimiters = listOf(
-        Regex("/users") to BurstyRateLimiter(permits = 20, per = 1.seconds),
-        Regex("/users/\\d+") to SmoothRateLimiter(permits = 5, per = 1.seconds),
-        Regex("/search.*") to BurstyRateLimiter(permits = 2, per = 1.seconds),
+        RegexRouteRule(Regex("/users"), BurstyRateLimiter(permits = 20, per = 1.seconds)),
+        RegexRouteRule(Regex("/users/\\d+"), SmoothRateLimiter(permits = 5, per = 1.seconds)),
+        RegexRouteRule(Regex("/search.*"), BurstyRateLimiter(permits = 2, per = 1.seconds)),
     ),
 )
 
@@ -93,6 +125,8 @@ val user = client.request("/users/42") {
 }
 ```
 
+As with prefix matching, regex routes are checked in declaration order. A matched regex route can be composed with the global limiter so both limits apply to the same request.
+
 ### When to use which
 
 | | Prefix | Regex |
@@ -104,19 +138,24 @@ val user = client.request("/users/42") {
 
 ## Layered Limits with CompositeRateLimiter
 
-Both approaches work with `CompositeRateLimiter` when an API enforces multiple limits simultaneously:
+Both approaches work with `CompositeRateLimiter` when an API enforces multiple limits simultaneously. The important part is that a matched route must compose the global and route-specific limiters for that request, rather than replacing one with the other:
 
 ```kotlin
 val client = RateLimitedClient(
-    defaultLimiter = CompositeRateLimiter(
-        BurstyRateLimiter(permits = 10, per = 1.seconds),
-        BurstyRateLimiter(permits = 1000, per = 1.hours),
-    ),
-    routeLimiters = mapOf(
-        "/search" to SmoothRateLimiter(permits = 2, per = 1.seconds),
+    defaultLimiter = BurstyRateLimiter(permits = 10, per = 1.seconds),
+    routeLimiters = listOf(
+        RouteRule(
+            "/search",
+            CompositeRateLimiter(
+                BurstyRateLimiter(permits = 1000, per = 1.hours),
+                SmoothRateLimiter(permits = 2, per = 1.seconds),
+            ),
+        ),
     ),
 )
 ```
+
+That gives `/search` requests all three constraints: the global `10/second` limiter, the route-specific `1000/hour` limiter, and the route-specific `2/second` smoother.
 
 ## Notes
 

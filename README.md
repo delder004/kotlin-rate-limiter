@@ -14,7 +14,7 @@ There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460)
 
 This library is:
 
-- **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` and `AtomicReference`, no Java concurrency primitives.
+- **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` and `AtomicReference`, no locks or blocking Java concurrency primitives.
 - **Testable with virtual time** — inject `testTimeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
 - **Focused** — small API surface. No framework, no annotations, no configuration files.
 - **Client-side** — designed for throttling your outbound API calls, not for protecting your server endpoints.
@@ -219,28 +219,42 @@ suspend fun getProperty(address: String): Property {
 
 ### Per-Route HTTP Client
 
-Wrap any HTTP client with per-route rate limits. Routes are matched by prefix — the first match wins, with a default limiter as fallback. See [`docs/RateLimitedHttpClient.md`](docs/RateLimitedHttpClient.md) for a regex variant and more details.
+Wrap any HTTP client with per-route rate limits. Routes are matched in declaration order, the first match wins, and a matched route can be composed with a global limiter so both quotas apply to the same request. See [`docs/RateLimitedHttpClient.md`](docs/RateLimitedHttpClient.md) for a regex variant and more details.
 
 ```kotlin
+data class RouteRule(
+    val prefix: String,
+    val limiter: RefundableRateLimiter,
+)
+
 class RateLimitedClient(
     private val client: HttpClient = HttpClient(),
-    private val defaultLimiter: RateLimiter = BurstyRateLimiter(permits = 10, per = 1.seconds),
-    private val routeLimiters: Map<String, RateLimiter> = emptyMap(),
+    private val defaultLimiter: RefundableRateLimiter? = BurstyRateLimiter(permits = 100, per = 1.minutes),
+    private val routeLimiters: List<RouteRule> = emptyList(),
 ) {
     suspend fun <T> request(route: String, block: suspend HttpClient.() -> T): T {
-        val limiter = routeLimiters.entries
-            .firstOrNull { route.startsWith(it.key) }
-            ?.value
-            ?: defaultLimiter
+        val routeLimiter = routeLimiters
+            .firstOrNull { route == it.prefix || route.startsWith("${it.prefix}/") }
+            ?.limiter
 
-        return limiter.withPermit { client.block() }
+        val limiter = when {
+            defaultLimiter != null && routeLimiter != null -> CompositeRateLimiter(defaultLimiter, routeLimiter)
+            routeLimiter != null -> routeLimiter
+            else -> defaultLimiter
+        }
+
+        return if (limiter == null) {
+            client.block()
+        } else {
+            limiter.withPermit { client.block() }
+        }
     }
 }
 
 val client = RateLimitedClient(
-    routeLimiters = mapOf(
-        "/search" to SmoothRateLimiter(permits = 2, per = 1.seconds),
-        "/uploads" to BurstyRateLimiter(permits = 5, per = 1.minutes),
+    routeLimiters = listOf(
+        RouteRule("/search", SmoothRateLimiter(permits = 2, per = 1.seconds)),
+        RouteRule("/uploads", BurstyRateLimiter(permits = 5, per = 1.minutes)),
     ),
 )
 
@@ -251,7 +265,9 @@ val results = client.request("/search") {
 
 ### Ktor Client Plugin
 
-If you are already using Ktor, install rate limiting directly into the client pipeline so every outbound request passes through the configured policy. See [`docs/KtorClientPluginExample.md`](docs/KtorClientPluginExample.md) for the full implementation and tests.
+If you are already using Ktor, the repo includes a tested client plugin example that installs rate limiting directly into the client pipeline so every outbound request passes through the configured policy.
+
+This plugin is **not** part of the published `kotlin-rate-limiter` artifact. Copy or adapt the example from [`src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt`](src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt), and see [`docs/KtorClientPluginExample.md`](docs/KtorClientPluginExample.md) for the implementation notes and tests.
 
 ```kotlin
 val allRoutes = BurstyRateLimiter(permits = 100, per = 1.minutes)
@@ -300,6 +316,7 @@ urlFlow
 The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testTimeSource` to tie the rate limiter's clock to virtual time:
 
 ```kotlin
+@OptIn(ExperimentalCoroutinesApi::class)
 @Test
 fun `acquire suspends when permits exhausted`() = runTest {
     val limiter = BurstyRateLimiter(
