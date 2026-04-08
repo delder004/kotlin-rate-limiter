@@ -33,6 +33,7 @@ class RateLimitingConfig {
 
     private val routes = mutableListOf<RouteRule>()
 
+    // Rules are matched in declaration order. The first matching rule wins.
     internal fun findLimiter(request: HttpRequestBuilder): RateLimiter? =
         routes.firstOrNull { it.matches(request) }?.limiter ?: defaultLimiter
 
@@ -65,23 +66,9 @@ class RateLimitingConfig {
                 predicate = predicate,
             )
     }
-
-    fun route(
-        limiter: RateLimiter,
-        method: HttpMethod? = null,
-        predicate: (HttpRequestBuilder) -> Boolean = { true },
-    ) {
-        routes +=
-            RouteRule(
-                limiter = limiter,
-                method = method,
-                pathMatcher = RoutePathMatcher.Any,
-                predicate = predicate,
-            )
-    }
 }
 
-private data class RouteRule(
+private class RouteRule(
     val limiter: RateLimiter,
     val method: HttpMethod?,
     val pathMatcher: RoutePathMatcher,
@@ -104,7 +91,7 @@ private sealed interface RoutePathMatcher {
     data class Prefix(
         val value: String,
     ) : RoutePathMatcher {
-        override fun matches(path: String): Boolean = path.startsWith(value)
+        override fun matches(path: String): Boolean = path == value || path.startsWith("$value/")
     }
 
     data class Regex(

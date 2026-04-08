@@ -37,12 +37,6 @@ This library is:
 - Ktor client plugin example: [`docs/KtorClientPluginExample.md`](docs/KtorClientPluginExample.md)
 - HTTP client wrapper: [`docs/RateLimitedHttpClient.md`](docs/RateLimitedHttpClient.md)
 
-## Examples
-
-First-class examples live in [`src/examples/kotlin`](src/examples/kotlin).
-
-- Ktor client plugin for route-based rate limiting: [`src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt`](src/examples/kotlin/ratelimiter/examples/KtorClientRateLimitingPlugin.kt)
-
 ## Installation
 
 ```kotlin
@@ -219,6 +213,72 @@ suspend fun getProperty(address: String): Property {
         is Permit.Denied -> {
             cache.get(address) ?: throw ServiceUnavailableException()
         }
+    }
+}
+```
+
+### Per-Route HTTP Client
+
+Wrap any HTTP client with per-route rate limits. Routes are matched by prefix — the first match wins, with a default limiter as fallback. See [`docs/RateLimitedHttpClient.md`](docs/RateLimitedHttpClient.md) for a regex variant and more details.
+
+```kotlin
+class RateLimitedClient(
+    private val client: HttpClient = HttpClient(),
+    private val defaultLimiter: RateLimiter = BurstyRateLimiter(permits = 10, per = 1.seconds),
+    private val routeLimiters: Map<String, RateLimiter> = emptyMap(),
+) {
+    suspend fun <T> request(route: String, block: suspend HttpClient.() -> T): T {
+        val limiter = routeLimiters.entries
+            .firstOrNull { route.startsWith(it.key) }
+            ?.value
+            ?: defaultLimiter
+
+        return limiter.withPermit { client.block() }
+    }
+}
+
+val client = RateLimitedClient(
+    routeLimiters = mapOf(
+        "/search" to SmoothRateLimiter(permits = 2, per = 1.seconds),
+        "/uploads" to BurstyRateLimiter(permits = 5, per = 1.minutes),
+    ),
+)
+
+val results = client.request("/search") {
+    get("https://api.example.com/search?q=foo")
+}
+```
+
+### Ktor Client Plugin
+
+If you are already using Ktor, install rate limiting directly into the client pipeline so every outbound request passes through the configured policy. See [`docs/KtorClientPluginExample.md`](docs/KtorClientPluginExample.md) for the full implementation and tests.
+
+```kotlin
+val allRoutes = BurstyRateLimiter(permits = 100, per = 1.minutes)
+val userReads = BurstyRateLimiter(permits = 20, per = 1.minutes)
+val payments = BurstyRateLimiter(permits = 5, per = 1.minutes)
+
+val client = HttpClient {
+    install(RateLimitingPlugin) {
+        defaultLimiter = allRoutes
+
+        route(
+            "/users",
+            limiter = CompositeRateLimiter(allRoutes, userReads),
+            method = HttpMethod.Get,
+        )
+
+        route(
+            "/payments",
+            limiter = CompositeRateLimiter(allRoutes, payments),
+            method = HttpMethod.Post,
+        )
+
+        route(
+            Regex("/search/\\w+"),
+            limiter = CompositeRateLimiter(allRoutes, userReads),
+            method = HttpMethod.Get,
+        )
     }
 }
 ```
