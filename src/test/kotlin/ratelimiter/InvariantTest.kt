@@ -2,12 +2,10 @@ package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.testTimeSource
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import kotlin.random.Random
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -29,17 +27,7 @@ class InvariantTest {
         seed: Long,
         limiterType: String,
     ) = runTest {
-        val limiter =
-            when (limiterType) {
-                "bursty" -> BurstyRateLimiter(10, 1.seconds, testTimeSource)
-                "smooth" -> SmoothRateLimiter(10, 1.seconds, Duration.ZERO, testTimeSource)
-                "composite" ->
-                    CompositeRateLimiter(
-                        BurstyRateLimiter(10, 1.seconds, testTimeSource),
-                        SmoothRateLimiter(10, 1.seconds, Duration.ZERO, testTimeSource),
-                    )
-                else -> error("unknown limiter type: $limiterType")
-            }
+        val limiter = createTestLimiter(limiterType, 10, 1.seconds)
         val ops = Random(seed).scenario(200)
         val results = runScenario(limiter, *ops)
         assertInvariants(results)

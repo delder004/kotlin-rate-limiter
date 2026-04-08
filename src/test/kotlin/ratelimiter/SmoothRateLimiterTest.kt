@@ -11,7 +11,6 @@ import kotlinx.coroutines.test.testTimeSource
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -82,16 +81,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             assertTrue(burst2.isCompleted)
         }
 
-    @Test
-    fun `tryAcquire Denied includes correct retryAfter`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            limiter.acquire(5)
-            val permit = limiter.tryAcquire()
-            assertIs<Permit.Denied>(permit)
-            assertEquals(200.milliseconds, permit.retryAfter)
-        }
-
     // IDLE and RESUME
 
     @Test
@@ -103,16 +92,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             limiter.acquire(5)
             limiter.acquire(1)
             assertEquals(1000, currentTime - before)
-        }
-
-    @Test
-    fun `acquire after long idle returns immediately`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            advanceTimeBy(10.seconds)
-            val before = currentTime
-            limiter.acquire(1)
-            assertEquals(0L, currentTime - before)
         }
 
     // MULTI-PERMIT
@@ -180,5 +159,4 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             runCurrent()
             assertTrue(job2.isCompleted)
         }
-
 }

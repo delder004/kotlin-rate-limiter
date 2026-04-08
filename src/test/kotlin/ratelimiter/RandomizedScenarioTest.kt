@@ -2,7 +2,6 @@ package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
@@ -13,8 +12,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import kotlin.random.Random
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -28,13 +25,6 @@ class RandomizedScenarioTest {
             )
     }
 
-    private fun TestScope.limiter(type: String, permits: Int, per: Duration): RateLimiter =
-        when (type) {
-            "bursty" -> BurstyRateLimiter(permits, per, testTimeSource)
-            "smooth" -> SmoothRateLimiter(permits, per, Duration.ZERO, testTimeSource)
-            else -> error("unknown type: $type")
-        }
-
     @ParameterizedTest(name = "{0} total delay matches random batch sizes")
     @MethodSource("limiterTypes")
     fun `total delay matches permits consumed with random batch sizes`(type: String) =
@@ -42,7 +32,7 @@ class RandomizedScenarioTest {
             val capacity = 100
             val per = 1.seconds
             val intervalMs = (per / capacity).inWholeMilliseconds
-            val limiter = limiter(type, capacity, per)
+            val limiter = createTestLimiter(type, capacity, per)
             val random = Random(42)
 
             val requests = (1..50).map { random.nextInt(1, 10) }
@@ -84,7 +74,7 @@ class RandomizedScenarioTest {
     @MethodSource("limiterTypes")
     fun `tryAcquire denials do not affect acquire timing`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 5, per = 1.seconds)
+            val limiter = createTestLimiter(type, permits = 5, per = 1.seconds)
             limiter.acquire(5)
 
             repeat(1000) { limiter.tryAcquire() }
@@ -92,37 +82,5 @@ class RandomizedScenarioTest {
             val before = currentTime
             limiter.acquire()
             assertEquals(200L, currentTime - before)
-        }
-
-    @Test
-    fun `random interleaving of acquire and tryAcquire is consistent`() =
-        runTest {
-            val limiter = BurstyRateLimiter(20, 1.seconds, testTimeSource)
-            val random = Random(99)
-
-            var totalAcquired = 0
-            var totalGranted = 0
-            var totalDenied = 0
-
-            repeat(200) {
-                if (random.nextBoolean()) {
-                    limiter.acquire()
-                    totalAcquired++
-                } else {
-                    when (limiter.tryAcquire()) {
-                        is Permit.Granted -> totalGranted++
-                        is Permit.Denied -> totalDenied++
-                    }
-                }
-            }
-
-            assertTrue(totalAcquired > 0, "Some acquires should have run")
-            assertTrue(totalGranted + totalDenied > 0, "Some tryAcquires should have run")
-            val totalConsumed = totalAcquired + totalGranted
-            val minExpectedTime = (totalConsumed - 20).coerceAtLeast(0) * 50L
-            assertTrue(
-                currentTime >= minExpectedTime,
-                "Expected >= ${minExpectedTime}ms for $totalConsumed consumed, got ${currentTime}ms",
-            )
         }
 }

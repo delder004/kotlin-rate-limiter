@@ -97,16 +97,6 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
             assertEquals(200, currentTime - before)
         }
 
-    @Test
-    fun `acquire after long idle returns immediately`() =
-        runTest {
-            val limiter = createLimiter(5, 1.seconds)
-            advanceTimeBy(10.seconds)
-            val before = currentTime
-            limiter.acquire(5)
-            assertEquals(0L, currentTime - before)
-        }
-
     // MULTI-PERMIT
 
     @Test

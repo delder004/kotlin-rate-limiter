@@ -206,5 +206,4 @@ abstract class RateLimiterContractTest {
             runCurrent()
             assertTrue("second" in results)
         }
-
 }

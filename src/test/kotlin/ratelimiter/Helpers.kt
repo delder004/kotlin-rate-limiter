@@ -7,11 +7,30 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.testTimeSource
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+
+// Shared limiter factory for parameterized tests
+@OptIn(ExperimentalCoroutinesApi::class)
+fun TestScope.createTestLimiter(
+    type: String,
+    permits: Int,
+    per: Duration,
+): RateLimiter =
+    when (type) {
+        "bursty" -> BurstyRateLimiter(permits, per, testTimeSource)
+        "smooth" -> SmoothRateLimiter(permits, per, Duration.ZERO, testTimeSource)
+        "composite" ->
+            CompositeRateLimiter(
+                BurstyRateLimiter(permits, per, testTimeSource),
+                SmoothRateLimiter(permits, per, Duration.ZERO, testTimeSource),
+            )
+        else -> error("unknown limiter type: $type")
+    }
 
 // Record delays for a series of acquires
 @OptIn(ExperimentalCoroutinesApi::class)

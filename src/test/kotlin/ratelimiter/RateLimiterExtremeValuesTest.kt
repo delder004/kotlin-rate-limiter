@@ -2,7 +2,6 @@ package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -34,13 +33,6 @@ class RateLimiterExtremeValuesTest {
             )
     }
 
-    private fun TestScope.limiter(type: String, permits: Int, per: Duration): RateLimiter =
-        when (type) {
-            "bursty" -> BurstyRateLimiter(permits, per, testTimeSource)
-            "smooth" -> SmoothRateLimiter(permits, per, timeSource = testTimeSource)
-            else -> error("unknown type: $type")
-        }
-
     @Test
     fun `composite rejects empty limiter list`() {
         assertFailsWith<IllegalArgumentException> { CompositeRateLimiter() }
@@ -63,7 +55,7 @@ class RateLimiterExtremeValuesTest {
     @MethodSource("limiterTypes")
     fun `very slow rate limiter paces correctly`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 1, per = 10.minutes)
+            val limiter = createTestLimiter(type, permits = 1, per = 10.minutes)
             limiter.acquire()
 
             val before = currentTime
@@ -87,7 +79,7 @@ class RateLimiterExtremeValuesTest {
     @MethodSource("limiterTypes")
     fun `retryAfter stays finite after deep debt`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 10, per = 1.seconds)
+            val limiter = createTestLimiter(type, permits = 10, per = 1.seconds)
             limiter.acquire(10_000)
 
             val denied = limiter.tryAcquire()
@@ -100,7 +92,7 @@ class RateLimiterExtremeValuesTest {
     @MethodSource("limiterTypes")
     fun `tryAcquire with Int MAX_VALUE permits does not crash`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 10, per = 1.seconds)
+            val limiter = createTestLimiter(type, permits = 10, per = 1.seconds)
             val denied = limiter.tryAcquire(Int.MAX_VALUE)
             assertIs<Permit.Denied>(denied)
             assertTrue(denied.retryAfter > Duration.ZERO)
@@ -110,7 +102,7 @@ class RateLimiterExtremeValuesTest {
     @MethodSource("limiterTypes")
     fun `refill after very long idle does not overflow`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 10, per = 1.seconds)
+            val limiter = createTestLimiter(type, permits = 10, per = 1.seconds)
             if (type == "bursty") {
                 limiter.acquire(10)
             } else {
@@ -157,7 +149,7 @@ class RateLimiterExtremeValuesTest {
     @MethodSource("limiterTypes")
     fun `cancelling massive acquire restores permits correctly`(type: String) =
         runTest {
-            val limiter = limiter(type, permits = 5, per = 1.seconds)
+            val limiter = createTestLimiter(type, permits = 5, per = 1.seconds)
             if (type == "bursty") {
                 limiter.acquire(5)
             } else {
