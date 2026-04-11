@@ -313,7 +313,7 @@ urlFlow
 
 ## Testing
 
-The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testTimeSource` to tie the rate limiter's clock to virtual time:
+The library is designed for deterministic testing with `kotlinx-coroutines-test`. Pass `testTimeSource` to tie the rate limiter's clock to virtual time. `testTimeSource` is a `TestScope` extension property from `kotlinx.coroutines.test` — it's shorthand for `testScheduler.timeSource`:
 
 ```kotlin
 @OptIn(ExperimentalCoroutinesApi::class)

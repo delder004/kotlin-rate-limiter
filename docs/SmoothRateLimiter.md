@@ -54,6 +54,24 @@ val limiter = SmoothRateLimiter(
 )
 ```
 
+## Warmup Behavior
+
+When `warmup` is specified, the limiter starts cold and linearly ramps to full speed. The curve works as follows:
+
+- **Cold interval** = 3x the stable interval. With `permits = 10, per = 1.seconds`, the stable interval is 100ms, so the cold interval is 300ms.
+- **Linear ramp.** The interval between permits decreases linearly from the cold interval to the stable interval over the warmup duration.
+- **Cooldown after idle.** If the limiter sits idle, it cools back down at a constant rate. A full idle period equal to the warmup duration returns it to fully cold. Shorter idle periods result in partial cooldown — the limiter resumes from a partially warm state.
+
+Example with `permits = 10, per = 1.seconds, warmup = 30.seconds`:
+
+```
+Cold start        → interval between permits: 300ms (3x stable)
+  ↓ linear ramp over 30s
+Fully warm        → interval between permits: 100ms (stable rate)
+  ↓ idle for 15s
+Partially cooled  → interval resumes at ~200ms, ramps back to 100ms
+```
+
 ## Considerations
 
 - **Use when you need even spacing.** If the downstream service is sensitive to bursts (connection pooling, CPU spikes), smooth is the right choice. For quota-style limits ("100 per minute"), use [BurstyRateLimiter](BurstyRateLimiter.md) instead.

@@ -66,7 +66,7 @@ when (val permit = limiter.tryAcquire()) {
 
 ## Testing
 
-Inject `testTimeSource` to tie the limiter to virtual time:
+Inject `testTimeSource` (a `TestScope` extension property from `kotlinx.coroutines.test`, shorthand for `testScheduler.timeSource`) to tie the limiter to virtual time:
 
 ```kotlin
 @Test
