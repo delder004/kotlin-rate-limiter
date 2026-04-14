@@ -8,6 +8,8 @@ A coroutine-native rate limiter for Kotlin. Controls the pace of outbound reques
 
 `kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 21.
 
+**Try it live:** [kotlin-rate-limiter-demo.dev](https://kotlin-rate-limiter-demo.dev) — interactive playground to experiment with the limiters in your browser.
+
 ## Why?
 
 There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460) on kotlinx.coroutines (since 2018) requesting a suspendable rate limiter. A [PR was submitted and closed](https://github.com/Kotlin/kotlinx.coroutines/pull/2799) without being merged. The existing options are either Java-based wrappers (resilience4j, Bucket4j) that don't integrate with virtual time testing, or part of large resilience frameworks where you pull in the whole kitchen sink for one primitive.
