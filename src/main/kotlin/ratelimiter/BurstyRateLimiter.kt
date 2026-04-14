@@ -33,8 +33,8 @@ internal class BurstyRateLimiterImpl(
             stableRefillInterval = period / permits,
         ),
         PermitBucket(
-            available = permits.toDouble(),
-            refilledAt = timeSource.markNow(),
+            balance = permits.toDouble(),
+            asOf = timeSource.markNow(),
         ),
     ) {
     init {
@@ -42,8 +42,11 @@ internal class BurstyRateLimiterImpl(
         require(period > Duration.ZERO) { "Period must be positive, was $period" }
     }
 
+    // With no warmup, cold and stable intervals collapse, so this is simply
+    // the stable refill interval per owed permit. The `next` vs `refilled`
+    // choice that matters for [SmoothRateLimiter] is a no-op here.
     override fun waitDuration(
         refilled: PermitBucket,
         next: PermitBucket,
-    ): Duration = next.refillInterval(config) * -next.deficit
+    ): Duration = next.refillInterval(config) * next.permitsOwed
 }

@@ -14,11 +14,11 @@ internal abstract class AtomicRateLimiter(
 ) : RefundableRateLimiter {
     private val bucketState = AtomicReference(initialBucket)
 
-    private data class Attempt(
+    private data class AcquireTransition(
         val current: PermitBucket,
         val refilled: PermitBucket,
         val next: PermitBucket,
-        val delay: Duration,
+        val waitFor: Duration,
     )
 
     protected abstract fun waitDuration(
@@ -30,11 +30,15 @@ internal abstract class AtomicRateLimiter(
         require(permits > 0) { "Permits must be positive, was $permits" }
 
         while (true) {
-            val attempt = nextAttempt(permits)
+            val t = computeAcquireTransition(permits)
 
-            if (bucketState.compareAndSet(attempt.current, attempt.next)) {
+            // Publish the reservation atomically *before* waiting. Concurrent
+            // callers already see the consumed permits, so their wait times
+            // stack correctly; a cancellation during delay refunds via a
+            // separate CAS loop below.
+            if (bucketState.compareAndSet(t.current, t.next)) {
                 return try {
-                    delay(attempt.delay)
+                    delay(t.waitFor)
                 } catch (e: CancellationException) {
                     bucketState.updateAndFetch { bucket -> bucket.refund(permits, config) }
                     throw e
@@ -47,17 +51,20 @@ internal abstract class AtomicRateLimiter(
         require(permits > 0) { "Permits must be positive, was $permits" }
 
         while (true) {
-            val attempt = nextAttempt(permits)
+            val t = computeAcquireTransition(permits)
 
-            if (attempt.delay == Duration.ZERO) {
-                if (bucketState.compareAndSet(attempt.current, attempt.next)) {
+            if (t.waitFor == Duration.ZERO) {
+                if (bucketState.compareAndSet(t.current, t.next)) {
                     return Permit.Granted
                 }
                 continue
             }
 
-            if (bucketState.compareAndSet(attempt.current, attempt.refilled)) {
-                return Permit.Denied(retryAfter = attempt.delay)
+            // Denial CASes to `refilled`, not `next`: we want to publish any
+            // refill/cooldown progress observed during this attempt, but must
+            // not reserve future permits for a caller that isn't going to wait.
+            if (bucketState.compareAndSet(t.current, t.refilled)) {
+                return Permit.Denied(retryAfter = t.waitFor)
             }
         }
     }
@@ -72,15 +79,15 @@ internal abstract class AtomicRateLimiter(
         }
     }
 
-    private fun nextAttempt(permits: Int): Attempt {
+    private fun computeAcquireTransition(permits: Int): AcquireTransition {
         val current = bucketState.load()
         val refilled = current.refill(config)
         val next = refilled.consume(permits, config)
-        return Attempt(
+        return AcquireTransition(
             current = current,
             refilled = refilled,
             next = next,
-            delay = waitDuration(refilled, next),
+            waitFor = waitDuration(refilled, next),
         )
     }
 }

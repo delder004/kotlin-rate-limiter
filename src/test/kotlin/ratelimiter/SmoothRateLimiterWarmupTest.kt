@@ -127,19 +127,19 @@ class SmoothRateLimiterWarmupTest {
         }
 
     @Test
-    fun `refund does not allow negative warmupPermitsConsumed`() =
+    fun `refund does not allow negative warmupProgress`() =
         runTest {
             val bucket =
                 PermitBucket(
-                    available = -1.0,
-                    refilledAt = testTimeSource.markNow(),
-                    warmupPermitsConsumed = 0.5,
+                    balance = -1.0,
+                    asOf = testTimeSource.markNow(),
+                    warmupProgress = 0.5,
                 )
 
             val restored = bucket.refund(1, warmupConfig())
             assertTrue(
-                restored.warmupPermitsConsumed >= 0.0,
-                "warmupPermitsConsumed should not go negative, was ${restored.warmupPermitsConsumed}",
+                restored.warmupProgress >= 0.0,
+                "warmupProgress should not go negative, was ${restored.warmupProgress}",
             )
         }
 
@@ -209,16 +209,16 @@ class SmoothRateLimiterWarmupTest {
 
             val warmBucket =
                 PermitBucket(
-                    available = 0.0,
-                    refilledAt = mark,
-                    warmupPermitsConsumed = 5.0,
+                    balance = 0.0,
+                    asOf = mark,
+                    warmupProgress = 5.0,
                 )
 
             val halfWarmBucket =
                 PermitBucket(
-                    available = 0.0,
-                    refilledAt = mark,
-                    warmupPermitsConsumed = 2.5,
+                    balance = 0.0,
+                    asOf = mark,
+                    warmupProgress = 2.5,
                 )
 
             advanceTimeBy(800.milliseconds)
@@ -226,13 +226,13 @@ class SmoothRateLimiterWarmupTest {
             val warmRefilled = warmBucket.refill(config)
             val halfRefilled = halfWarmBucket.refill(config)
 
-            val warmDrop = warmBucket.warmupPermitsConsumed - warmRefilled.warmupPermitsConsumed
-            val halfDrop = halfWarmBucket.warmupPermitsConsumed - halfRefilled.warmupPermitsConsumed
+            val warmDrop = warmBucket.warmupProgress - warmRefilled.warmupProgress
+            val halfDrop = halfWarmBucket.warmupProgress - halfRefilled.warmupProgress
 
             assertTrue(
                 warmDrop <= halfDrop * 2.0,
                 "Warm bucket should not cool more than 2x faster than half-warm bucket. " +
-                    "Warm lost $warmDrop wpc, half-warm lost $halfDrop wpc " +
+                    "Warm lost $warmDrop progress, half-warm lost $halfDrop progress " +
                     "(ratio: ${if (halfDrop > 0) warmDrop / halfDrop else "inf"}x)",
             )
         }
@@ -243,9 +243,9 @@ class SmoothRateLimiterWarmupTest {
             val config = warmupConfig()
             val bucket =
                 PermitBucket(
-                    available = 0.0,
-                    refilledAt = testTimeSource.markNow(),
-                    warmupPermitsConsumed = 5.0,
+                    balance = 0.0,
+                    asOf = testTimeSource.markNow(),
+                    warmupProgress = 5.0,
                 )
 
             advanceTimeBy(500.milliseconds)
@@ -255,11 +255,11 @@ class SmoothRateLimiterWarmupTest {
             val oneStep = bucket.refill(config)
 
             assertEquals(
-                oneStep.warmupPermitsConsumed,
-                twoStep.warmupPermitsConsumed,
-                "Single 1s refill and two 500ms refills should produce the same warmth. " +
-                    "One-step wpc=${oneStep.warmupPermitsConsumed}, " +
-                    "two-step wpc=${twoStep.warmupPermitsConsumed}",
+                oneStep.warmupProgress,
+                twoStep.warmupProgress,
+                "Single 1s refill and two 500ms refills should produce the same warmup progress. " +
+                    "One-step progress=${oneStep.warmupProgress}, " +
+                    "two-step progress=${twoStep.warmupProgress}",
             )
         }
 
@@ -268,9 +268,9 @@ class SmoothRateLimiterWarmupTest {
         runTest {
             val bucket =
                 PermitBucket(
-                    available = 1.0,
-                    refilledAt = testTimeSource.markNow(),
-                    warmupPermitsConsumed = 5.0,
+                    balance = 1.0,
+                    asOf = testTimeSource.markNow(),
+                    warmupProgress = 5.0,
                 )
 
             advanceTimeBy(1.seconds)
@@ -278,8 +278,8 @@ class SmoothRateLimiterWarmupTest {
             val cooled = bucket.refill(warmupConfig())
 
             assertTrue(
-                cooled.warmupPermitsConsumed in 2.4..2.6,
-                "After half the warmup idle, limiter should be half cooled, was ${cooled.warmupPermitsConsumed}",
+                cooled.warmupProgress in 2.4..2.6,
+                "After half the warmup idle, limiter should be half cooled, was ${cooled.warmupProgress}",
             )
             assertTrue(
                 cooled.refillInterval(warmupConfig()) in 390.milliseconds..410.milliseconds,

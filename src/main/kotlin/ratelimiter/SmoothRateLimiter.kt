@@ -45,8 +45,8 @@ internal class SmoothRateLimiterImpl(
             warmup = warmup,
         ),
         PermitBucket(
-            available = MAX_STORED_PERMITS,
-            refilledAt = timeSource.markNow(),
+            balance = MAX_STORED_PERMITS,
+            asOf = timeSource.markNow(),
         ),
     ) {
     init {
@@ -55,8 +55,12 @@ internal class SmoothRateLimiterImpl(
         require(warmup >= Duration.ZERO) { "Warmup can't be negative, was $warmup" }
     }
 
+    // Uses `refilled.refillInterval` (pre-consume), not `next.refillInterval`
+    // (post-consume). Accruing warmup progress pushes the refill interval
+    // toward stable (faster); charging the caller the post-consume interval
+    // would credit this acquisition for warmup progress it only just caused.
     override fun waitDuration(
         refilled: PermitBucket,
         next: PermitBucket,
-    ): Duration = refilled.refillInterval(config) * -next.deficit
+    ): Duration = refilled.refillInterval(config) * next.permitsOwed
 }
