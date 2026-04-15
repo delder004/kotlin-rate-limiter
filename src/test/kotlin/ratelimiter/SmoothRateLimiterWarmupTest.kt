@@ -3,6 +3,7 @@ package ratelimiter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -173,6 +174,113 @@ class SmoothRateLimiterWarmupTest {
             assertTrue(
                 currentTime - before >= 500,
                 "Post-cancellation warmup delay should reflect cold interval, was ${currentTime - before}ms",
+            )
+        }
+
+    @Test
+    fun `cancellation at zero elapsed matches baseline under warmup`() =
+        runTest {
+            // Baseline: drain the initial permit, then record the next five
+            // delays with no interference.
+            val baselineLimiter = warmupLimiter()
+            baselineLimiter.acquire()
+            val baseline = recordDelays(baselineLimiter, 5)
+
+            // Cancel path: fresh limiter, drain, launch an acquire, cancel
+            // it immediately (no virtual time between launch and cancel), then
+            // record the same five delays. Exercises the rewind fast path at
+            // elapsed=0 — the cancellation restores state exactly.
+            val cancelLimiter = warmupLimiter()
+            cancelLimiter.acquire()
+            val job = launch { cancelLimiter.acquire() }
+            runCurrent()
+            job.cancel()
+            runCurrent()
+            val afterCancel = recordDelays(cancelLimiter, 5)
+
+            assertEquals(baseline, afterCancel, "post-cancel delays should match baseline")
+        }
+
+    @Test
+    fun `cancellation after partial delay matches baseline under warmup`() =
+        runTest {
+            // Baseline: drain, let 100ms of idle time elapse, then record
+            // five delays. No cancelled acquire in the picture at all.
+            val baselineLimiter = warmupLimiter()
+            baselineLimiter.acquire()
+            advanceTimeBy(100.milliseconds)
+            val baseline = recordDelays(baselineLimiter, 5)
+
+            // Cancel path: same drain, launch a child acquire that will wait
+            // on the warmup delay, advance 100ms into its wait, cancel. The
+            // rewind fast path replaces the consumed state with t.current
+            // refilled to now, so the 100ms counts as idle time against the
+            // pre-acquire warmup state (not as debt repayment against the
+            // cancelled acquire). Delays must match the baseline element-wise.
+            val cancelLimiter = warmupLimiter()
+            cancelLimiter.acquire()
+            val job = launch { cancelLimiter.acquire() }
+            runCurrent()
+            advanceTimeBy(100.milliseconds)
+            job.cancel()
+            runCurrent()
+            val afterCancel = recordDelays(cancelLimiter, 5)
+
+            assertEquals(baseline, afterCancel, "post-cancel delays should match baseline after partial elapsed")
+        }
+
+    @Test
+    fun `cancellation after concurrent state change uses slow-path refund under warmup`() =
+        runTest {
+            val limiter = warmupLimiter()
+            limiter.acquire() // drain the initial stored permit
+
+            val job = launch { limiter.acquire() }
+            runCurrent()
+
+            advanceTimeBy(100.milliseconds)
+
+            // This denied tryAcquire publishes refill progress from the
+            // cancelled acquire's reserved state, so bucketState is no longer
+            // the original `t.next` and the cancellation must take the
+            // concurrent slow path.
+            val concurrentDenied = limiter.tryAcquire()
+            assertIs<Permit.Denied>(concurrentDenied)
+
+            job.cancel()
+            runCurrent()
+
+            val afterCancel = limiter.tryAcquire()
+            assertIs<Permit.Denied>(afterCancel)
+
+            // Mirror the same transitions on a separate scheduler so the
+            // expected result is independent of the real limiter's state.
+            val expectedScheduler = TestCoroutineScheduler()
+            val expectedConfig =
+                BucketConfig(
+                    capacity = 1.0,
+                    timeSource = expectedScheduler.timeSource,
+                    stableRefillInterval = 200.milliseconds,
+                    warmup = 2.seconds,
+                )
+            val drained =
+                PermitBucket(
+                    balance = 0.0,
+                    asOf = expectedScheduler.timeSource.markNow(),
+                )
+            val reserved = drained.consume(1, expectedConfig)
+            val warmupDelta = reserved.warmupProgress - drained.warmupProgress
+            expectedScheduler.advanceTimeBy(100)
+            val touchedByConcurrentCaller = reserved.refill(expectedConfig)
+            val expectedBucket = touchedByConcurrentCaller.refundCancelled(1, warmupDelta, expectedConfig)
+            val expectedRetryAfter =
+                expectedBucket.refillInterval(expectedConfig) *
+                    expectedBucket.consume(1, expectedConfig).permitsOwed
+
+            assertEquals(
+                expectedRetryAfter,
+                afterCancel.retryAfter,
+                "post-cancel retryAfter should match the slow-path refund model after concurrent state change",
             )
         }
 

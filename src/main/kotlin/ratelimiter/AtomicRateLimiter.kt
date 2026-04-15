@@ -19,6 +19,10 @@ internal abstract class AtomicRateLimiter(
         val refilled: PermitBucket,
         val next: PermitBucket,
         val waitFor: Duration,
+        // Exact warmup progress added by this acquisition. Carried so the
+        // cancellation slow path can invert the consume more faithfully
+        // without reconstructing it from the already-advanced bucket.
+        val warmupDelta: Double,
     )
 
     protected abstract fun waitDuration(
@@ -34,13 +38,27 @@ internal abstract class AtomicRateLimiter(
 
             // Publish the reservation atomically *before* waiting. Concurrent
             // callers already see the consumed permits, so their wait times
-            // stack correctly; a cancellation during delay refunds via a
-            // separate CAS loop below.
+            // stack correctly; a cancellation during delay refunds via the
+            // CAS loop below.
             if (bucketState.compareAndSet(t.current, t.next)) {
                 return try {
                     delay(t.waitFor)
                 } catch (e: CancellationException) {
-                    bucketState.updateAndFetch { bucket -> bucket.refund(permits, config) }
+                    // Prefer an exact rewind: if no other caller has touched
+                    // bucketState since our CAS, the state is still t.next and
+                    // we can replace it with t.current refilled to now — fully
+                    // "as if this acquire never happened", with the elapsed
+                    // delay counted as ordinary idle time against the
+                    // pre-acquire state (no phantom debt repayment, no warmer
+                    // interval). If another caller has advanced the state,
+                    // fall back to the best-effort refundCancelled.
+                    bucketState.updateAndFetch { bucket ->
+                        if (bucket === t.next) {
+                            t.current.refill(config)
+                        } else {
+                            bucket.refundCancelled(permits, t.warmupDelta, config)
+                        }
+                    }
                     throw e
                 }
             }
@@ -88,6 +106,7 @@ internal abstract class AtomicRateLimiter(
             refilled = refilled,
             next = next,
             waitFor = waitDuration(refilled, next),
+            warmupDelta = next.warmupProgress - refilled.warmupProgress,
         )
     }
 }

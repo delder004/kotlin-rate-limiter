@@ -71,6 +71,13 @@ internal data class PermitBucket(
     // Refill to "now" before refunding — refunding against stale state would
     // credit the returned permits against elapsed time that should only have
     // counted toward ordinary refill.
+    //
+    // Best-effort on warmup state: subtracts the nominal `permits` from
+    // warmupProgress rather than the amount the matching consume actually
+    // added. When the consume found fractional positive balance, the two
+    // differ by `max(balance, 0)`. The cancellation path in AtomicRateLimiter
+    // uses [refundCancelled] instead, which takes the exact delta from the
+    // AcquireTransition that produced this state.
     fun refund(
         permits: Int,
         config: BucketConfig,
@@ -79,6 +86,27 @@ internal data class PermitBucket(
         return refilled.copy(
             balance = (refilled.balance + permits).coerceAtMost(config.capacity),
             warmupProgress = (refilled.warmupProgress - permits).coerceAtLeast(0.0),
+        )
+    }
+
+    // Slow-path cancellation refund, used only when another caller has
+    // modified bucket state since the cancelled acquire CAS'd its reservation.
+    // The common single-caller case is handled by an exact rewind in
+    // AtomicRateLimiter.acquire — see there for the branching. This helper
+    // subtracts the exact `warmupDelta` produced by the matching consume, but
+    // it cannot un-do the phantom debt the cancelled acquire contributed to
+    // the refill interval during the elapsed delay, so for elapsed > 0 it only
+    // approximates "as if the acquire never happened". The remaining drift is
+    // config- and timing-dependent.
+    internal fun refundCancelled(
+        permits: Int,
+        warmupDelta: Double,
+        config: BucketConfig,
+    ): PermitBucket {
+        val refilled = refill(config)
+        return refilled.copy(
+            balance = (refilled.balance + permits).coerceAtMost(config.capacity),
+            warmupProgress = (refilled.warmupProgress - warmupDelta).coerceAtLeast(0.0),
         )
     }
 

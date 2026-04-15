@@ -5,7 +5,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.milliseconds
@@ -121,26 +120,43 @@ class PermitBucketInvariantsTest {
             assertEquals(1.5, refilled.warmupProgress, tolerance)
         }
 
-    // Test 5 — consume.refund idempotence on warmupProgress
+    // Test 5 — refundCancelled inverts consume when no time elapses.
     //
-    // Disabled: surfaces a known asymmetry in the internal math. consume(n) adds
-    // `borrowed = n - max(balance, 0)` to warmupProgress, but refund(n) subtracts
-    // a flat `n`, clawing back `max(balance, 0)` extra units when balance was
-    // fractional positive at consume time. Keep the `refund-warmup-asymmetry`
-    // marker in sync with the follow-up task when enabling this test.
+    // The cancellation slow path in AtomicRateLimiter.acquire calls
+    // refundCancelled with the exact warmup delta captured at consume time, so
+    // the pair is exact at zero elapsed even when balance was fractional
+    // positive. The common cancellation path now uses an exact rewind instead;
+    // public `refund()` remains best-effort on warmup state by design — see
+    // the refund-warmup-asymmetry memory for the tradeoff.
 
     @Test
-    @Disabled(
-        "TODO: refund-warmup-asymmetry — consume(n).refund(n) drops warmupProgress by " +
-            "max(balance, 0) when balance was fractional positive at consume time.",
-    )
-    fun `consume followed by refund restores warmupProgress when no time elapses`() =
+    fun `refundCancelled reverses consume when no time elapses`() =
         runTest {
             val config = warmupConfig()
-            // Invariant is intentionally scoped to "no time elapses between
-            // consume and refund", so the expected restoration is exact. The
-            // starting state (fractional positive balance, positive warmup
-            // progress) is the combination that exposes the asymmetry.
+            // Fractional positive balance plus positive warmup progress —
+            // the combination that exposes the asymmetry in public refund().
+            val bucket =
+                PermitBucket(
+                    balance = 0.0714,
+                    asOf = testTimeSource.markNow(),
+                    warmupProgress = 0.9,
+                )
+
+            val consumed = bucket.consume(1, config)
+            val warmupDelta = consumed.warmupProgress - bucket.warmupProgress
+            val result = consumed.refundCancelled(1, warmupDelta, config)
+
+            assertEquals(bucket.balance, result.balance, tolerance)
+            assertEquals(bucket.warmupProgress, result.warmupProgress, tolerance)
+        }
+
+    @Test
+    fun `public refund is best-effort on warmup state`() =
+        runTest {
+            val config = warmupConfig()
+            // Same starting state as the refundCancelled test — lets the two
+            // pin the precise delta between exact cancellation accounting and
+            // the public best-effort refund.
             val bucket =
                 PermitBucket(
                     balance = 0.0714,
@@ -150,6 +166,9 @@ class PermitBucketInvariantsTest {
 
             val result = bucket.consume(1, config).refund(1, config)
 
-            assertEquals(0.9, result.warmupProgress, tolerance)
+            // Public refund subtracts the nominal permit count, so warmup
+            // progress drops below the original by exactly max(balance, 0).
+            // Documented in the refund-warmup-asymmetry memory.
+            assertEquals(bucket.warmupProgress - bucket.balance, result.warmupProgress, tolerance)
         }
 }
