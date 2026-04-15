@@ -23,8 +23,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
         per: Duration,
     ): RateLimiter = SmoothRateLimiter(permits, per, Duration.ZERO, testTimeSource)
 
-    // BASIC SMOOTH BEHAVIOR
-
     @Test
     fun `first permit returned immediately, subsequent permits delayed even when available`() =
         runTest {
@@ -81,8 +79,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             assertTrue(burst2.isCompleted)
         }
 
-    // IDLE and RESUME
-
     @Test
     fun `idle accumulation capped at 1`() =
         runTest {
@@ -93,8 +89,6 @@ class SmoothRateLimiterTest : RateLimiterContractTest() {
             limiter.acquire(1)
             assertEquals(1000, currentTime - before)
         }
-
-    // MULTI-PERMIT
 
     @Test
     fun `acquire(n) consumes multiple permits`() =

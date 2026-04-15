@@ -89,10 +89,9 @@ internal sealed class PermitBucket {
      * a higher value means a faster refill interval for the next caller.
      * See [BucketConfig] for the derivation.
      *
-     * Every update refills first, repaying any negative balance *before*
-     * cooling warmup state. The order matters: if warmup cooled over the
-     * full elapsed window, the time spent repaying debt would be
-     * double-counted as idle.
+     * Every update refills first, repaying any negative balance before cooling
+     * warmup state. Otherwise, debt-repayment time would be double-counted as
+     * idle cooldown.
      */
     data class Warming(
         override val balance: Double,
@@ -108,10 +107,6 @@ internal sealed class PermitBucket {
         override fun refillInterval(config: BucketConfig): Duration =
             config.coldRefillInterval + (config.stableRefillInterval - config.coldRefillInterval) * warmupFraction(config)
 
-        // Sequence: repay any negative balance first, then cool warmup state
-        // only with the elapsed time remaining after debt repayment, then
-        // clamp stored permits to capacity. Swapping the first two steps
-        // would double-count debt-repayment time as idle cooldown.
         override fun refill(config: BucketConfig): Warming {
             val elapsed = asOf.elapsedNow()
             if (elapsed <= Duration.ZERO) return this

@@ -26,8 +26,6 @@ abstract class RateLimiterContractTest {
         per: Duration,
     ): RateLimiter
 
-    // ACQUIRE
-
     @Test
     fun `acquire suspends when permits exhausted`() =
         runTest {
@@ -56,8 +54,6 @@ abstract class RateLimiterContractTest {
             runCurrent()
             assertTrue(acquired)
         }
-
-    // TRYACQUIRE
 
     @Test
     fun `tryAcquire returns Granted when permits available`() =
@@ -125,8 +121,6 @@ abstract class RateLimiterContractTest {
             assertIs<Permit.Granted>(limiter.tryAcquire())
         }
 
-    // IDLE AND RESUME
-
     @Test
     fun `idle time is not penalized`() =
         runTest {
@@ -137,8 +131,6 @@ abstract class RateLimiterContractTest {
             limiter.acquire(1)
             assertEquals(200, currentTime - before)
         }
-
-    // PARAMETER VALIDATION
 
     @ParameterizedTest(name = "acquire rejects permits={0}")
     @ValueSource(ints = [0, -1])
@@ -170,8 +162,6 @@ abstract class RateLimiterContractTest {
             val per = perMillis.milliseconds
             assertFailsWith<IllegalArgumentException> { createLimiter(permits = 5, per = per) }
         }
-
-    // CANCELLATION
 
     @Test
     fun `cancelled coroutine restores permits`() =

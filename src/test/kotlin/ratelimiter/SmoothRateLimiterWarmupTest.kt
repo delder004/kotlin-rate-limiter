@@ -180,16 +180,12 @@ class SmoothRateLimiterWarmupTest {
     @Test
     fun `cancellation at zero elapsed matches baseline under warmup`() =
         runTest {
-            // Baseline: drain the initial permit, then record the next five
-            // delays with no interference.
+            // Baseline with no cancellation.
             val baselineLimiter = warmupLimiter()
             baselineLimiter.acquire()
             val baseline = recordDelays(baselineLimiter, 5)
 
-            // Cancel path: fresh limiter, drain, launch an acquire, cancel
-            // it immediately (no virtual time between launch and cancel), then
-            // record the same five delays. Exercises the rewind fast path at
-            // elapsed=0 — the cancellation restores state exactly.
+            // Immediate cancellation should leave the sequence unchanged.
             val cancelLimiter = warmupLimiter()
             cancelLimiter.acquire()
             val job = launch { cancelLimiter.acquire() }
@@ -204,19 +200,13 @@ class SmoothRateLimiterWarmupTest {
     @Test
     fun `cancellation after partial delay matches baseline under warmup`() =
         runTest {
-            // Baseline: drain, let 100ms of idle time elapse, then record
-            // five delays. No cancelled acquire in the picture at all.
+            // Baseline after 100ms of ordinary idle time.
             val baselineLimiter = warmupLimiter()
             baselineLimiter.acquire()
             advanceTimeBy(100.milliseconds)
             val baseline = recordDelays(baselineLimiter, 5)
 
-            // Cancel path: same drain, launch a child acquire that will wait
-            // on the warmup delay, advance 100ms into its wait, cancel. The
-            // rewind fast path replaces the consumed state with t.current
-            // refilled to now, so the 100ms counts as idle time against the
-            // pre-acquire warmup state (not as debt repayment against the
-            // cancelled acquire). Delays must match the baseline element-wise.
+            // Cancelling after 100ms of waiting should match that same idle window.
             val cancelLimiter = warmupLimiter()
             cancelLimiter.acquire()
             val job = launch { cancelLimiter.acquire() }
@@ -240,10 +230,7 @@ class SmoothRateLimiterWarmupTest {
 
             advanceTimeBy(100.milliseconds)
 
-            // This denied tryAcquire publishes refill progress from the
-            // cancelled acquire's reserved state, so bucketState is no longer
-            // the original `t.next` and the cancellation must take the
-            // concurrent slow path.
+            // Touch the reserved state so cancellation has to use the slow path.
             val concurrentDenied = limiter.tryAcquire()
             assertIs<Permit.Denied>(concurrentDenied)
 
@@ -253,8 +240,7 @@ class SmoothRateLimiterWarmupTest {
             val afterCancel = limiter.tryAcquire()
             assertIs<Permit.Denied>(afterCancel)
 
-            // Mirror the same transitions on a separate scheduler so the
-            // expected result is independent of the real limiter's state.
+            // Mirror the same transitions on an independent scheduler.
             val expectedScheduler = TestCoroutineScheduler()
             val expectedConfig =
                 BucketConfig(

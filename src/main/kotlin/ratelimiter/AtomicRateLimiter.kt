@@ -19,9 +19,7 @@ internal abstract class AtomicRateLimiter(
         val refilled: PermitBucket,
         val next: PermitBucket,
         val waitFor: Duration,
-        // Exact warmup progress added by this acquisition. Carried so the
-        // cancellation slow path can invert the consume more faithfully
-        // without reconstructing it from the already-advanced bucket.
+        // Exact warmup delta from this consume, reused by the cancellation slow path.
         val warmupDelta: Double,
     )
 
@@ -44,17 +42,11 @@ internal abstract class AtomicRateLimiter(
                 return try {
                     delay(t.waitFor)
                 } catch (e: CancellationException) {
-                    // Prefer an exact rewind: if no other caller has touched
-                    // bucketState since our CAS, the state is still t.next and
-                    // we can replace it with t.current refilled to now — fully
-                    // "as if this acquire never happened", with the elapsed
-                    // delay counted as ordinary idle time against the
-                    // pre-acquire state (no phantom debt repayment, no warmer
-                    // interval). If another caller has advanced the state,
-                    // fall back to a best-effort refund: on a Warming bucket
-                    // we can subtract the exact warmup delta we recorded at
-                    // transition time; on a Stable bucket there is no warmup
-                    // bookkeeping and a plain refund is trivially exact.
+                    // Prefer an exact rewind: if the state is still t.next, replace
+                    // it with t.current refilled to now, as if this acquire never
+                    // happened. If another caller has already advanced the state,
+                    // fall back to refunding from the newer bucket state. Warm
+                    // buckets need the recorded warmupDelta; stable buckets do not.
                     bucketState.updateAndFetch { bucket ->
                         if (bucket === t.next) {
                             t.current.refill(config)

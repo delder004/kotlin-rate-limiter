@@ -13,7 +13,6 @@ import kotlin.time.TimeSource
  * @param permits maximum burst size and total permits restored per period; must be positive
  * @param per period over which [permits] are replenished; must be positive
  * @param timeSource monotonic source used to measure refill timing
- * @return a [RefundableRateLimiter] that supports [refund][RefundableRateLimiter.refund] for returning unused permits
  */
 @Suppress("FunctionName")
 fun BurstyRateLimiter(

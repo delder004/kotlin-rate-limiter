@@ -29,8 +29,6 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
             SmoothRateLimiter(permits, per, timeSource = testTimeSource),
         )
 
-    // COMPOSITE-SPECIFIC TESTS
-
     @Test
     fun `acquire succeeds when all limiters have capacity`() =
         runTest {

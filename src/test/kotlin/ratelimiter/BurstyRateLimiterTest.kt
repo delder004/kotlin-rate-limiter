@@ -25,8 +25,6 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
         per: Duration,
     ): RateLimiter = BurstyRateLimiter(permits, per, testTimeSource)
 
-    // BASIC BURST BEHAVIOR
-
     @Test
     fun `acquire immediately returns when permits available`() =
         runTest {
@@ -85,8 +83,6 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
             assertEquals(200.milliseconds, permit.retryAfter)
         }
 
-    // IDLE and RESUME
-
     @Test
     fun `idle accumulation capped at permit count`() =
         runTest {
@@ -97,8 +93,6 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
             limiter.acquire(1)
             assertEquals(200, currentTime - before)
         }
-
-    // MULTI-PERMIT
 
     @Test
     fun `acquire(n) consumes multiple permits`() =
@@ -162,10 +156,7 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
 
             advanceTimeBy(100.milliseconds)
 
-            // This denied tryAcquire publishes refill progress from the
-            // cancelled acquire's reserved state, so bucketState is no longer
-            // the original `t.next` and the cancellation must take the
-            // concurrent slow path.
+            // Touch the reserved state so cancellation has to use the slow path.
             val concurrentDenied = limiter.tryAcquire()
             assertIs<Permit.Denied>(concurrentDenied)
 
@@ -175,8 +166,7 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
             val afterCancel = limiter.tryAcquire()
             assertIs<Permit.Denied>(afterCancel)
 
-            // Mirror the same transitions on a separate scheduler so the
-            // expected result is independent of the real limiter's state.
+            // Mirror the same transitions on an independent scheduler.
             val expectedScheduler = TestCoroutineScheduler()
             val expectedConfig =
                 BucketConfig(

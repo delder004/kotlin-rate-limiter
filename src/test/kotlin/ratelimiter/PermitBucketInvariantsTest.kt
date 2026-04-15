@@ -22,8 +22,6 @@ class PermitBucketInvariantsTest {
             warmup = 2.seconds,
         )
 
-    // Test 1 — permitsOwed is always non-negative
-
     @Test
     fun `permitsOwed is zero when balance is positive`() =
         runTest {
@@ -46,8 +44,6 @@ class PermitBucketInvariantsTest {
             val bucket = PermitBucket.Stable(balance = -3.0, asOf = testTimeSource.markNow())
             assertEquals(3.0, bucket.permitsOwed, tolerance)
         }
-
-    // Test 2 — warmupProgress stays within [0, maxWarmupPermits]
 
     @Test
     fun `consume saturates warmupProgress at maxWarmupPermits`() =
@@ -82,8 +78,6 @@ class PermitBucketInvariantsTest {
 
             assertEquals(0.0, refilled.warmupProgress)
         }
-
-    // Test 3 — no warmup cooldown while balance < 0
 
     @Test
     fun `refill does not cool warmup while balance is being repaid`() =
@@ -120,21 +114,12 @@ class PermitBucketInvariantsTest {
             assertEquals(1.5, refilled.warmupProgress, tolerance)
         }
 
-    // Test 5 — refundCancelled inverts consume when no time elapses.
-    //
-    // The cancellation slow path in AtomicRateLimiter.acquire calls
-    // refundCancelled with the exact warmup delta captured at consume time, so
-    // the pair is exact at zero elapsed even when balance was fractional
-    // positive. The common cancellation path now uses an exact rewind instead;
-    // public `refund()` remains best-effort on warmup state by design — see
-    // the refund-warmup-asymmetry memory for the tradeoff.
-
     @Test
     fun `refundCancelled reverses consume when no time elapses`() =
         runTest {
             val config = warmupConfig()
-            // Fractional positive balance plus positive warmup progress —
-            // the combination that exposes the asymmetry in public refund().
+            // Fractional positive balance exposes the difference between exact
+            // cancellation accounting and the public best-effort refund.
             val bucket =
                 PermitBucket.Warming(
                     balance = 0.0714,
@@ -153,9 +138,7 @@ class PermitBucketInvariantsTest {
     fun `public refund is best-effort on warmup state`() =
         runTest {
             val config = warmupConfig()
-            // Same starting state as the refundCancelled test — lets the two
-            // pin the precise delta between exact cancellation accounting and
-            // the public best-effort refund.
+            // Same starting state as the exact-cancellation test.
             val bucket =
                 PermitBucket.Warming(
                     balance = 0.0714,
@@ -165,9 +148,8 @@ class PermitBucketInvariantsTest {
 
             val result = bucket.consume(1, config).bucket.refund(1, config)
 
-            // Public refund subtracts the nominal permit count, so warmup
-            // progress drops below the original by exactly max(balance, 0).
-            // Documented in the refund-warmup-asymmetry memory.
+            // refund() subtracts the nominal permit count from warmupProgress,
+            // so a fractional positive balance leaves it short by max(balance, 0).
             assertEquals(bucket.warmupProgress - bucket.balance, result.warmupProgress, tolerance)
         }
 }

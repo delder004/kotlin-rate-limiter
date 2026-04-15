@@ -20,7 +20,6 @@ private const val MAX_STORED_PERMITS = 1.0
  * @param per period over which [permits] are produced; must be positive
  * @param warmup optional ramp-up duration before reaching the steady-state rate
  * @param timeSource monotonic source used to measure refill timing
- * @return a [RefundableRateLimiter] that supports [refund][RefundableRateLimiter.refund] for returning unused permits
  */
 @Suppress("FunctionName")
 fun SmoothRateLimiter(
