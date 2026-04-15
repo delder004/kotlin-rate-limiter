@@ -95,6 +95,36 @@ abstract class RateLimiterContractTest {
             assertEquals(Permit.Granted, limiter.tryAcquire())
         }
 
+    @Test
+    fun `denied tryAcquire publishes refill progress without reserving permits`() =
+        runTest {
+            val limiter = createLimiter(permits = 1, per = 100.milliseconds)
+            limiter.acquire() // drain to zero
+
+            advanceTimeBy(30.milliseconds)
+            val denied1 = limiter.tryAcquire()
+            assertIs<Permit.Denied>(denied1)
+
+            advanceTimeBy(30.milliseconds)
+            val denied2 = limiter.tryAcquire()
+            assertIs<Permit.Denied>(denied2)
+
+            // retryAfter must shrink across denials: each denial publishes the
+            // refill progress observed between calls. If denial CASed the
+            // consumed state instead of the refilled state, permits would be
+            // reserved and retryAfter would be monotonic non-decreasing.
+            assertTrue(
+                denied2.retryAfter < denied1.retryAfter,
+                "retryAfter should shrink across denials: " +
+                    "denied1=${denied1.retryAfter}, denied2=${denied2.retryAfter}",
+            )
+
+            // And no reservation happened: waiting out denied2.retryAfter is
+            // sufficient for the next tryAcquire to succeed.
+            advanceTimeBy(denied2.retryAfter)
+            assertIs<Permit.Granted>(limiter.tryAcquire())
+        }
+
     // IDLE AND RESUME
 
     @Test
