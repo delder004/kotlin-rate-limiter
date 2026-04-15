@@ -7,6 +7,17 @@ The format is based on Keep a Changelog and the project aims to follow Semantic 
 ## [Unreleased]
 
 - Initial public documentation and OSS project scaffolding
+- **Fixed**: `CompositeRateLimiter.tryAcquire()` no longer over-cools
+  `SmoothRateLimiter` delegates configured with a warmup ramp. When a
+  composite denial required probing remaining delegates for their
+  `retryAfter`, the previous `tryAcquire + refund` probe was not
+  state-neutral on warming smooth: a granted `tryAcquire` left heat
+  unchanged (grants draw from stored credit, not borrowed future), but
+  `refund` always decremented heat by `permits`. The net effect was
+  phantom cooling on the warming delegate after every composite denial.
+  Fixed via an internal non-mutating `peekWait` path used by composite's
+  probe. The bug predates the lock-based rewrite and was latent because
+  composite tests only exercised zero-warmup smooth delegates.
 - **Changed (behavior)**: `BurstyRateLimiter` and `SmoothRateLimiter` are now
   backed by lock-based schedule-mark implementations (`FixedIntervalLimiter`
   and `WarmingSmoothLimiter`) rather than the previous `AtomicReference`-based

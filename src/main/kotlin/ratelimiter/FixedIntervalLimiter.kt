@@ -25,7 +25,7 @@ internal class FixedIntervalLimiter(
     private val capacity: Double,
     private val interval: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
-) : RefundableRateLimiter {
+) : PeekableRateLimiter {
     init {
         require(capacity >= 1.0) { "capacity must be at least 1.0, was $capacity" }
         require(interval > Duration.ZERO) { "interval must be positive, was $interval" }
@@ -65,6 +65,15 @@ internal class FixedIntervalLimiter(
             require(permits > 0) { "permits must be positive, was $permits" }
             val now = timeSource.markNow()
             nextPermitAt = maxOf(nextPermitAt - interval * permits, now - interval * capacity)
+        }
+
+    override fun peekWait(permits: Int): Duration =
+        synchronized(lock) {
+            require(permits > 0) { "permits must be positive, was $permits" }
+            val now = timeSource.markNow()
+            val base = maxOf(nextPermitAt, now - interval * capacity)
+            val newNext = base + interval * permits
+            if (newNext > now) newNext - now else Duration.ZERO
         }
 
     private fun reserve(permits: Int): Duration {

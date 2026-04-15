@@ -70,10 +70,24 @@ internal class CompositeRateLimiterImpl(
     ): Permit.Denied {
         var maxRetryAfter = initialRetryAfter
         remaining.forEach { limiter ->
-            when (val permit = limiter.tryAcquire(permits)) {
-                is Permit.Granted -> limiter.refund(permits)
-                is Permit.Denied -> maxRetryAfter = maxOf(maxRetryAfter, permit.retryAfter)
-            }
+            val wait =
+                if (limiter is PeekableRateLimiter) {
+                    // Non-mutating probe: avoids the `tryAcquire + refund`
+                    // asymmetry on WarmingSmoothLimiter (grant doesn't add
+                    // heat, refund always subtracts it).
+                    limiter.peekWait(permits)
+                } else {
+                    // Third-party RefundableRateLimiter: fall back to probe +
+                    // rollback, inheriting whatever semantics its refund provides.
+                    when (val permit = limiter.tryAcquire(permits)) {
+                        is Permit.Granted -> {
+                            limiter.refund(permits)
+                            Duration.ZERO
+                        }
+                        is Permit.Denied -> permit.retryAfter
+                    }
+                }
+            maxRetryAfter = maxOf(maxRetryAfter, wait)
         }
         return Permit.Denied(maxRetryAfter)
     }

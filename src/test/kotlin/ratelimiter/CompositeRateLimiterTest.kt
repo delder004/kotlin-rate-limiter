@@ -158,6 +158,104 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
             assertIs<Permit.Denied>(b.tryAcquire())
         }
 
+    // Regression test for a pre-existing bug exposed by the migration review:
+    // CompositeRateLimiter.collectRetryAfterFromRemaining used to probe delegates
+    // via tryAcquire + refund, which over-cools WarmingSmoothLimiter because a
+    // granted tryAcquire leaves heat unchanged but refund always decrements it.
+    // After the fix, the probe uses the internal peekWait path and the warming
+    // delegate's state must be untouched by a composite denial. We compare the
+    // post-probe delay sequence on the warming limiter against a baseline
+    // sequence recorded in an independent virtual-time scope with no probe.
+    @Test
+    fun `tryAcquire denial does not mutate warming smooth delegate`() {
+        fun snapshotDelays(runProbe: Boolean): List<Long> {
+            val captured = mutableListOf<Long>()
+            runTest {
+                val warm =
+                    SmoothRateLimiter(
+                        permits = 5,
+                        per = 1.seconds,
+                        warmup = 2.seconds,
+                        timeSource = testTimeSource,
+                    )
+
+                // Warm up to heat > 0 and advance into a partially-cooled state
+                // where a stored permit is available. This is the only regime
+                // where the old tryAcquire + refund probe would have visibly
+                // over-cooled the limiter — heat > 0 before the probe, with a
+                // grantable permit at probe time so the refund decrement lands
+                // on non-zero heat.
+                repeat(3) { warm.acquire() }
+                advanceTimeBy(680.milliseconds)
+
+                if (runProbe) {
+                    val bursty = BurstyRateLimiter(1, 1.seconds, testTimeSource)
+                    bursty.acquire() // exhaust
+                    val composite = CompositeRateLimiter(bursty, warm)
+                    val denied = composite.tryAcquire()
+                    assertIs<Permit.Denied>(denied)
+                }
+
+                captured += recordDelays(warm, 4)
+            }
+            return captured
+        }
+
+        val baseline = snapshotDelays(runProbe = false)
+        val probed = snapshotDelays(runProbe = true)
+
+        assertEquals(
+            baseline,
+            probed,
+            "composite tryAcquire probe must not mutate warming smooth delegate state",
+        )
+    }
+
+    @Test
+    fun `acquire rollback works with warming smooth delegate`() =
+        runTest {
+            val warm =
+                SmoothRateLimiter(
+                    permits = 5,
+                    per = 1.seconds,
+                    warmup = 2.seconds,
+                    timeSource = testTimeSource,
+                )
+            // Warm up so the rollback has non-trivial heat to handle, then
+            // advance time so warm has a stored permit at composite-acquire
+            // time. Without this advance, warm would still be in debt and
+            // composite.acquire() would suspend inside warm.acquire() before
+            // ever reaching slow — which means cancellation would land in
+            // warm's own catch block, not composite's, and `acquired` would
+            // be empty. The time advance is what forces the acquireAllOrRollback
+            // path to actually grant warm, add it to `acquired`, and then
+            // block on slow — so cancellation actually exercises the rollback.
+            repeat(3) { warm.acquire() }
+            advanceTimeBy(1.seconds)
+
+            val slow = BurstyRateLimiter(1, 10.seconds, testTimeSource)
+            slow.acquire() // exhaust
+
+            val composite = CompositeRateLimiter(warm, slow)
+
+            val job = launch { composite.acquire() }
+            runCurrent()
+            job.cancel()
+            runCurrent()
+
+            // The rollback must have refunded the warm delegate, restoring a
+            // stored permit: the next direct acquire on warm should be
+            // immediate. If rollback didn't run (the original bug shape for
+            // this test), warm would still have consumed the permit and the
+            // first delay would reflect a borrowed-permit cold-ramp wait.
+            val delays = recordDelays(warm, 3)
+            assertEquals(
+                0L,
+                delays[0],
+                "rollback should credit back a stored permit, so the next acquire is immediate",
+            )
+        }
+
     @Test
     fun `layered limits work correctly`() =
         runTest {

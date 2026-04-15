@@ -35,7 +35,7 @@ internal class WarmingSmoothLimiter(
     private val stableInterval: Duration,
     warmup: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
-) : RefundableRateLimiter {
+) : PeekableRateLimiter {
     init {
         require(stableInterval > Duration.ZERO) { "stableInterval must be positive, was $stableInterval" }
         require(warmup > Duration.ZERO) { "warmup must be positive, was $warmup" }
@@ -152,6 +152,31 @@ internal class WarmingSmoothLimiter(
             nextPermitAt = maxOf(nextPermitAt - interval * permits, now - interval)
             heat = (heat - permits).coerceAtLeast(0.0)
             version++
+        }
+
+    // Simulates `coolHeatTo(now)` into a local `simHeat` and runs the grant/deny
+    // arithmetic without touching [heat], [heatUpdatedAt], [nextPermitAt], or
+    // [version]. Used by [CompositeRateLimiter] to probe retryAfter without
+    // committing state changes that `tryAcquire + refund` can't cleanly undo
+    // (granted tryAcquire leaves heat unchanged; refund always decrements it).
+    override fun peekWait(permits: Int): Duration =
+        synchronized(lock) {
+            require(permits > 0) { "permits must be positive, was $permits" }
+            val now = timeSource.markNow()
+
+            val idleStart = maxOf(heatUpdatedAt, nextPermitAt)
+            val simHeat =
+                if (idleStart < now) {
+                    (heat - (now - idleStart) / cooldownInterval).coerceAtLeast(0.0)
+                } else {
+                    heat
+                }
+
+            val f = (simHeat / maxHeat).coerceIn(0.0, 1.0)
+            val interval = coldInterval + (stableInterval - coldInterval) * f
+            val base = maxOf(nextPermitAt, now - interval)
+            val newNext = base + interval * permits
+            if (newNext > now) newNext - now else Duration.ZERO
         }
 
     private fun currentInterval(): Duration {
