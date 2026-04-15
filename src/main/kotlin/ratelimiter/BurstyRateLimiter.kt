@@ -12,40 +12,23 @@ import kotlin.time.TimeSource
  *
  * @param permits maximum burst size and total permits restored per period; must be positive
  * @param per period over which [permits] are replenished; must be positive
- * @param timeSource monotonic source used to measure refill timing
+ * @param timeSource monotonic source used to measure refill timing; must support comparable marks
+ *   (both [TimeSource.Monotonic] and `kotlinx-coroutines-test`'s `testTimeSource` satisfy this)
  */
 @Suppress("FunctionName")
 fun BurstyRateLimiter(
     permits: Int,
     per: Duration,
     timeSource: TimeSource = TimeSource.Monotonic,
-): RefundableRateLimiter = BurstyRateLimiterImpl(permits, per, timeSource)
-
-internal class BurstyRateLimiterImpl(
-    permits: Int,
-    period: Duration,
-    timeSource: TimeSource,
-) : AtomicRateLimiter(
-        BucketConfig(
-            capacity = permits.toDouble(),
-            timeSource = timeSource,
-            stableRefillInterval = period / permits,
-        ),
-        PermitBucket.Stable(
-            balance = permits.toDouble(),
-            asOf = timeSource.markNow(),
-        ),
-    ) {
-    init {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-        require(period > Duration.ZERO) { "Period must be positive, was $period" }
+): RefundableRateLimiter {
+    require(permits > 0) { "permits must be positive, was $permits" }
+    require(per > Duration.ZERO) { "per must be positive, was $per" }
+    require(timeSource is TimeSource.WithComparableMarks) {
+        "timeSource must support comparable marks (TimeSource.WithComparableMarks)"
     }
-
-    // With no warmup, cold and stable intervals collapse, so this is simply
-    // the stable refill interval per owed permit. The `next` vs `refilled`
-    // choice that matters for [SmoothRateLimiter] is a no-op here.
-    override fun waitDuration(
-        refilled: PermitBucket,
-        next: PermitBucket,
-    ): Duration = next.refillInterval(config) * next.permitsOwed
+    return FixedIntervalLimiter(
+        capacity = permits.toDouble(),
+        interval = per / permits,
+        timeSource = timeSource,
+    )
 }

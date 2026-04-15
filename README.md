@@ -16,7 +16,7 @@ There's an [open issue](https://github.com/Kotlin/kotlinx.coroutines/issues/460)
 
 This library is:
 
-- **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` and `AtomicReference`, no locks or blocking Java concurrency primitives.
+- **Coroutine-native** — `acquire()` suspends instead of blocking. Built on `delay()` with short, non-blocking critical sections; no background threads, no timers, no `CoroutineScope` lifecycle.
 - **Testable with virtual time** — inject `testTimeSource` and use `advanceTimeBy()` / `advanceUntilIdle()` for deterministic, instant tests.
 - **Focused** — small API surface. No framework, no annotations, no configuration files.
 - **Client-side** — designed for throttling your outbound API calls, not for protecting your server endpoints.
@@ -362,9 +362,9 @@ val noOpLimiter = object : RateLimiter {
 
 This matches the convention established by Guava's `RateLimiter` and resilience4j.
 
-### Why AtomicReference + CAS instead of Mutex?
+### Why non-suspending bookkeeping?
 
-Lock-free implementation means `tryAcquire()` works naturally as a non-suspend function, `refill()` is a pure function that's easy to test in isolation, and there's no coroutine suspension just for bookkeeping under contention.
+Limiter state is updated under a short, non-suspending critical section. That lets `tryAcquire()` work naturally as a non-suspending function, keeps `acquire()`'s only suspension point the actual `delay()` for the computed wait, and avoids paying coroutine machinery costs for bookkeeping under contention.
 
 ### Why lazy refill instead of a background coroutine?
 

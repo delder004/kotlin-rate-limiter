@@ -27,7 +27,7 @@ limiter.acquire(3)     // consumes 3 permits
 
 ### Considerations
 
-- **Cancellation-safe.** If a coroutine is cancelled while suspended in `acquire()`, the permits are returned to the limiter via CAS. No permits are leaked.
+- **Cancellation-safe.** If a coroutine is cancelled while suspended in `acquire()`, its permits are returned to the limiter. No permits are leaked.
 - **Current caller pays the wait.** `acquire()` reserves permits atomically, then suspends the calling coroutine for the required delay. If permits are not currently available, the caller that made the request waits before `acquire()` returns.
 - **Cancellation restores permits for future callers.** If a suspended `acquire()` is cancelled, its permits are refunded. This does not retroactively shorten delays that other waiters already computed before the cancellation.
 - **Positive permits only.** `acquire(permits)` requires `permits > 0` and throws `IllegalArgumentException` otherwise.

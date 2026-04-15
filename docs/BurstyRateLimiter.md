@@ -51,5 +51,5 @@ suspend fun checkCredit(userId: String): Score = dailyLimiter.withPermit {
 - **Use when an API specifies a quota.** "100 requests per minute" maps directly to `BurstyRateLimiter(permits = 100, per = 1.minutes)`.
 - **Burst then pace.** All accumulated permits can be consumed instantly. If you need evenly-spaced requests, use [SmoothRateLimiter](SmoothRateLimiter.md) instead.
 - **Permits refill lazily.** No background coroutine or timer. Permits are recalculated based on elapsed time each time you call `acquire()` or `tryAcquire()`. This means no `CoroutineScope` is needed and there's nothing to clean up.
-- **Shared across coroutines.** A single limiter instance coordinates all coroutines that call it. The internal state is lock-free (`AtomicReference` + CAS), so there's no coroutine suspension for bookkeeping.
+- **Shared across coroutines.** A single limiter instance coordinates all coroutines that call it. Bookkeeping happens under a short per-instance lock — no coroutine suspension, no background work.
 - **`refund(permits)` is available.** The factory returns `RefundableRateLimiter`, which adds `refund()` to return permits to the bucket if an operation is abandoned before completion.
