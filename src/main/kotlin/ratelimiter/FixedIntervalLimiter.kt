@@ -49,21 +49,23 @@ internal class FixedIntervalLimiter(
         }
     }
 
-    override fun tryAcquire(permits: Int): Permit = synchronized(lock) {
-        require(permits > 0) { "permits must be positive, was $permits" }
-        val now = timeSource.markNow()
-        val base = maxOf(nextPermitAt, now - interval * capacity)
-        val newNext = base + interval * permits
-        if (newNext > now) return Permit.Denied(newNext - now)
-        nextPermitAt = newNext
-        Permit.Granted
-    }
+    override fun tryAcquire(permits: Int): Permit =
+        synchronized(lock) {
+            require(permits > 0) { "permits must be positive, was $permits" }
+            val now = timeSource.markNow()
+            val base = maxOf(nextPermitAt, now - interval * capacity)
+            val newNext = base + interval * permits
+            if (newNext > now) return Permit.Denied(newNext - now)
+            nextPermitAt = newNext
+            Permit.Granted
+        }
 
-    override fun refund(permits: Int): Unit = synchronized(lock) {
-        require(permits > 0) { "permits must be positive, was $permits" }
-        val now = timeSource.markNow()
-        nextPermitAt = maxOf(nextPermitAt - interval * permits, now - interval * capacity)
-    }
+    override fun refund(permits: Int): Unit =
+        synchronized(lock) {
+            require(permits > 0) { "permits must be positive, was $permits" }
+            val now = timeSource.markNow()
+            nextPermitAt = maxOf(nextPermitAt - interval * permits, now - interval * capacity)
+        }
 
     private fun reserve(permits: Int): Duration {
         val now = timeSource.markNow()

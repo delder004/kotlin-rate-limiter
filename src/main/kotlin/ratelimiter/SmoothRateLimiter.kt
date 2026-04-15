@@ -3,8 +3,6 @@ package ratelimiter
 import kotlin.time.Duration
 import kotlin.time.TimeSource
 
-private const val MAX_STORED_PERMITS = 1.0
-
 /**
  * Creates a limiter that spreads permit issuance evenly over time, allowing at
  * most one permit to be available immediately.
@@ -19,7 +17,9 @@ private const val MAX_STORED_PERMITS = 1.0
  * @param permits target number of permits produced per [per]; must be positive
  * @param per period over which [permits] are produced; must be positive
  * @param warmup optional ramp-up duration before reaching the steady-state rate
- * @param timeSource monotonic source used to measure refill timing
+ * @param timeSource monotonic source used to measure refill timing; must support
+ *   comparable marks (both [TimeSource.Monotonic] and `kotlinx-coroutines-test`'s
+ *   `testTimeSource` satisfy this)
  */
 @Suppress("FunctionName")
 fun SmoothRateLimiter(
@@ -27,46 +27,17 @@ fun SmoothRateLimiter(
     per: Duration,
     warmup: Duration = Duration.ZERO,
     timeSource: TimeSource = TimeSource.Monotonic,
-): RefundableRateLimiter = SmoothRateLimiterImpl(permits, per, warmup, timeSource)
-
-internal class SmoothRateLimiterImpl(
-    permits: Int,
-    period: Duration,
-    warmup: Duration,
-    timeSource: TimeSource,
-) : AtomicRateLimiter(
-        BucketConfig(
-            // Smooth limiters store at most one immediately-available permit and
-            // encode throughput in the refill interval instead of bucket depth.
-            capacity = MAX_STORED_PERMITS,
-            timeSource = timeSource,
-            stableRefillInterval = period / permits,
-            warmup = warmup,
-        ),
-        if (warmup == Duration.ZERO) {
-            PermitBucket.Stable(
-                balance = MAX_STORED_PERMITS,
-                asOf = timeSource.markNow(),
-            )
-        } else {
-            PermitBucket.Warming(
-                balance = MAX_STORED_PERMITS,
-                asOf = timeSource.markNow(),
-            )
-        },
-    ) {
-    init {
-        require(permits > 0) { "Permits must be positive, was $permits" }
-        require(period > Duration.ZERO) { "Period must be positive, was $period" }
-        require(warmup >= Duration.ZERO) { "Warmup can't be negative, was $warmup" }
+): RefundableRateLimiter {
+    require(permits > 0) { "permits must be positive, was $permits" }
+    require(per > Duration.ZERO) { "per must be positive, was $per" }
+    require(warmup >= Duration.ZERO) { "warmup must be non-negative, was $warmup" }
+    require(timeSource is TimeSource.WithComparableMarks) {
+        "timeSource must support comparable marks (TimeSource.WithComparableMarks)"
     }
-
-    // Uses `refilled.refillInterval` (pre-consume), not `next.refillInterval`
-    // (post-consume). Accruing warmup progress pushes the refill interval
-    // toward stable (faster); charging the caller the post-consume interval
-    // would credit this acquisition for warmup progress it only just caused.
-    override fun waitDuration(
-        refilled: PermitBucket,
-        next: PermitBucket,
-    ): Duration = refilled.refillInterval(config) * next.permitsOwed
+    val stableInterval = per / permits
+    return if (warmup == Duration.ZERO) {
+        FixedIntervalLimiter(capacity = 1.0, interval = stableInterval, timeSource = timeSource)
+    } else {
+        WarmingSmoothLimiter(stableInterval = stableInterval, warmup = warmup, timeSource = timeSource)
+    }
 }

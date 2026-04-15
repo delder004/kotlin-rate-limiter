@@ -78,5 +78,5 @@ Partially cooled  → interval resumes at ~200ms, ramps back to 100ms
 - **Warmup starts at 3x the stable interval.** With `warmup = 30.seconds`, the interval between permits starts 3x slower than the steady-state rate and linearly decreases to the stable rate over the warmup period. This protects cold caches and connection pools.
 - **No large bursts.** Unlike bursty, idle time does not bank up a large bucket of permits. The limiter stores at most one immediately-available permit, so after idle there may be one free acquire before smooth pacing resumes.
 - **Warmup applies after the stored permit.** After a long idle period, the first acquire may still be immediate, and the following intervals ramp from cold toward the stable rate over the configured warmup period.
-- **Same lock-free, lazy design.** No background coroutines, no lifecycle to manage. Shared safely across coroutines.
+- **Same lazy design.** Bookkeeping happens under a short per-instance lock — no background coroutines, no lifecycle to manage, shared safely across coroutines.
 - **`refund(permits)` is available.** The factory returns `RefundableRateLimiter`, which adds `refund()` so permits can be returned if work is abandoned.

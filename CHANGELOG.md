@@ -7,15 +7,17 @@ The format is based on Keep a Changelog and the project aims to follow Semantic 
 ## [Unreleased]
 
 - Initial public documentation and OSS project scaffolding
-- **Changed (behavior)**: `BurstyRateLimiter` is now backed by a lock-based
-  fixed-interval implementation rather than the previous `AtomicReference`-based
-  `PermitBucket` state machine. The public factory signature is unchanged and
-  all existing behavior tests pass. **Compatibility note**: the factory now
-  requires its `timeSource` argument to implement `TimeSource.WithComparableMarks`
-  and will throw `IllegalArgumentException` at construction time otherwise.
-  `TimeSource.Monotonic` (the default) and `kotlinx-coroutines-test`'s
-  `testTimeSource` both satisfy this; custom `TimeSource` implementations that
-  do not mix in `WithComparableMarks` will need to be wrapped or updated.
+- **Changed (behavior)**: `BurstyRateLimiter` and `SmoothRateLimiter` are now
+  backed by lock-based schedule-mark implementations (`FixedIntervalLimiter`
+  and `WarmingSmoothLimiter`) rather than the previous `AtomicReference`-based
+  `PermitBucket` state machine. Public factory signatures are unchanged and
+  all existing behavior tests pass. **Compatibility note**: both factories
+  now require the `timeSource` argument to implement
+  `TimeSource.WithComparableMarks` and will throw `IllegalArgumentException`
+  at construction time otherwise. `TimeSource.Monotonic` (the default) and
+  `kotlinx-coroutines-test`'s `testTimeSource` both satisfy this; custom
+  `TimeSource` implementations that do not mix in `WithComparableMarks` will
+  need to be wrapped or updated.
 
 ## [0.1.0] - 2026-04-07
 
