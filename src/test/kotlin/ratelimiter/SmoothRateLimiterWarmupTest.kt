@@ -2,8 +2,8 @@ package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -131,7 +131,7 @@ class SmoothRateLimiterWarmupTest {
     fun `refund does not allow negative warmupProgress`() =
         runTest {
             val bucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = -1.0,
                     asOf = testTimeSource.markNow(),
                     warmupProgress = 0.5,
@@ -264,18 +264,19 @@ class SmoothRateLimiterWarmupTest {
                     warmup = 2.seconds,
                 )
             val drained =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0,
                     asOf = expectedScheduler.timeSource.markNow(),
                 )
-            val reserved = drained.consume(1, expectedConfig)
-            val warmupDelta = reserved.warmupProgress - drained.warmupProgress
+            val consumed = drained.consume(1, expectedConfig)
+            val reserved = consumed.bucket
+            val warmupDelta = consumed.warmupDelta
             expectedScheduler.advanceTimeBy(100)
             val touchedByConcurrentCaller = reserved.refill(expectedConfig)
             val expectedBucket = touchedByConcurrentCaller.refundCancelled(1, warmupDelta, expectedConfig)
             val expectedRetryAfter =
                 expectedBucket.refillInterval(expectedConfig) *
-                    expectedBucket.consume(1, expectedConfig).permitsOwed
+                    expectedBucket.consume(1, expectedConfig).bucket.permitsOwed
 
             assertEquals(
                 expectedRetryAfter,
@@ -316,14 +317,14 @@ class SmoothRateLimiterWarmupTest {
             val config = warmupConfig()
 
             val warmBucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0,
                     asOf = mark,
                     warmupProgress = 5.0,
                 )
 
             val halfWarmBucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0,
                     asOf = mark,
                     warmupProgress = 2.5,
@@ -350,7 +351,7 @@ class SmoothRateLimiterWarmupTest {
         runTest {
             val config = warmupConfig()
             val bucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0,
                     asOf = testTimeSource.markNow(),
                     warmupProgress = 5.0,
@@ -375,7 +376,7 @@ class SmoothRateLimiterWarmupTest {
     fun `refill only partially cools warmup state after partial idle`() =
         runTest {
             val bucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 1.0,
                     asOf = testTimeSource.markNow(),
                     warmupProgress = 5.0,

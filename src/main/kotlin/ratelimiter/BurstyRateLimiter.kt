@@ -32,7 +32,7 @@ internal class BurstyRateLimiterImpl(
             timeSource = timeSource,
             stableRefillInterval = period / permits,
         ),
-        PermitBucket(
+        PermitBucket.Stable(
             balance = permits.toDouble(),
             asOf = timeSource.markNow(),
         ),

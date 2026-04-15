@@ -44,10 +44,17 @@ internal class SmoothRateLimiterImpl(
             stableRefillInterval = period / permits,
             warmup = warmup,
         ),
-        PermitBucket(
-            balance = MAX_STORED_PERMITS,
-            asOf = timeSource.markNow(),
-        ),
+        if (warmup == Duration.ZERO) {
+            PermitBucket.Stable(
+                balance = MAX_STORED_PERMITS,
+                asOf = timeSource.markNow(),
+            )
+        } else {
+            PermitBucket.Warming(
+                balance = MAX_STORED_PERMITS,
+                asOf = timeSource.markNow(),
+            )
+        },
     ) {
     init {
         require(permits > 0) { "Permits must be positive, was $permits" }

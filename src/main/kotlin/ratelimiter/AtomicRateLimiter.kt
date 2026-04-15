@@ -51,12 +51,18 @@ internal abstract class AtomicRateLimiter(
                     // delay counted as ordinary idle time against the
                     // pre-acquire state (no phantom debt repayment, no warmer
                     // interval). If another caller has advanced the state,
-                    // fall back to the best-effort refundCancelled.
+                    // fall back to a best-effort refund: on a Warming bucket
+                    // we can subtract the exact warmup delta we recorded at
+                    // transition time; on a Stable bucket there is no warmup
+                    // bookkeeping and a plain refund is trivially exact.
                     bucketState.updateAndFetch { bucket ->
                         if (bucket === t.next) {
                             t.current.refill(config)
                         } else {
-                            bucket.refundCancelled(permits, t.warmupDelta, config)
+                            when (bucket) {
+                                is PermitBucket.Stable -> bucket.refund(permits, config)
+                                is PermitBucket.Warming -> bucket.refundCancelled(permits, t.warmupDelta, config)
+                            }
                         }
                     }
                     throw e
@@ -100,13 +106,13 @@ internal abstract class AtomicRateLimiter(
     private fun computeAcquireTransition(permits: Int): AcquireTransition {
         val current = bucketState.load()
         val refilled = current.refill(config)
-        val next = refilled.consume(permits, config)
+        val consumed = refilled.consume(permits, config)
         return AcquireTransition(
             current = current,
             refilled = refilled,
-            next = next,
-            waitFor = waitDuration(refilled, next),
-            warmupDelta = next.warmupProgress - refilled.warmupProgress,
+            next = consumed.bucket,
+            waitFor = waitDuration(refilled, consumed.bucket),
+            warmupDelta = consumed.warmupDelta,
         )
     }
 }

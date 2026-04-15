@@ -2,6 +2,7 @@ package ratelimiter
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
@@ -148,5 +149,58 @@ class BurstyRateLimiterTest : RateLimiterContractTest() {
             advanceTimeBy(200.milliseconds)
             runCurrent()
             assertTrue(job2.isCompleted)
+        }
+
+    @Test
+    fun `cancellation after concurrent state change uses slow-path refund on stable bucket`() =
+        runTest {
+            val limiter = createLimiter(1, 1.seconds)
+            limiter.acquire() // drain the initial stored permit
+
+            val job = launch { limiter.acquire() }
+            runCurrent()
+
+            advanceTimeBy(100.milliseconds)
+
+            // This denied tryAcquire publishes refill progress from the
+            // cancelled acquire's reserved state, so bucketState is no longer
+            // the original `t.next` and the cancellation must take the
+            // concurrent slow path.
+            val concurrentDenied = limiter.tryAcquire()
+            assertIs<Permit.Denied>(concurrentDenied)
+
+            job.cancel()
+            runCurrent()
+
+            val afterCancel = limiter.tryAcquire()
+            assertIs<Permit.Denied>(afterCancel)
+
+            // Mirror the same transitions on a separate scheduler so the
+            // expected result is independent of the real limiter's state.
+            val expectedScheduler = TestCoroutineScheduler()
+            val expectedConfig =
+                BucketConfig(
+                    capacity = 1.0,
+                    timeSource = expectedScheduler.timeSource,
+                    stableRefillInterval = 1.seconds,
+                )
+            val drained =
+                PermitBucket.Stable(
+                    balance = 0.0,
+                    asOf = expectedScheduler.timeSource.markNow(),
+                )
+            val reserved = drained.consume(1, expectedConfig).bucket
+            expectedScheduler.advanceTimeBy(100)
+            val touchedByConcurrentCaller = reserved.refill(expectedConfig)
+            val expectedBucket = touchedByConcurrentCaller.refund(1, expectedConfig)
+            val expectedRetryAfter =
+                expectedBucket.refillInterval(expectedConfig) *
+                    expectedBucket.consume(1, expectedConfig).bucket.permitsOwed
+
+            assertEquals(
+                expectedRetryAfter,
+                afterCancel.retryAfter,
+                "post-cancel retryAfter should match the stable slow-path refund model after concurrent state change",
+            )
         }
 }

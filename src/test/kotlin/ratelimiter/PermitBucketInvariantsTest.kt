@@ -27,7 +27,7 @@ class PermitBucketInvariantsTest {
     @Test
     fun `permitsOwed is zero when balance is positive`() =
         runTest {
-            val bucket = PermitBucket(balance = 5.0, asOf = testTimeSource.markNow())
+            val bucket = PermitBucket.Stable(balance = 5.0, asOf = testTimeSource.markNow())
             assertEquals(0.0, bucket.permitsOwed, tolerance)
         }
 
@@ -36,14 +36,14 @@ class PermitBucketInvariantsTest {
         runTest {
             // Double negation of 0.0 produces -0.0, which coerceAtLeast(0.0)
             // passes through as -0.0. Numerically zero, so tolerance assertion.
-            val bucket = PermitBucket(balance = 0.0, asOf = testTimeSource.markNow())
+            val bucket = PermitBucket.Stable(balance = 0.0, asOf = testTimeSource.markNow())
             assertEquals(0.0, bucket.permitsOwed, tolerance)
         }
 
     @Test
     fun `permitsOwed equals magnitude of negative balance`() =
         runTest {
-            val bucket = PermitBucket(balance = -3.0, asOf = testTimeSource.markNow())
+            val bucket = PermitBucket.Stable(balance = -3.0, asOf = testTimeSource.markNow())
             assertEquals(3.0, bucket.permitsOwed, tolerance)
         }
 
@@ -53,9 +53,9 @@ class PermitBucketInvariantsTest {
     fun `consume saturates warmupProgress at maxWarmupPermits`() =
         runTest {
             val config = warmupConfig()
-            val bucket = PermitBucket(balance = 1.0, asOf = testTimeSource.markNow())
+            val bucket = PermitBucket.Warming(balance = 1.0, asOf = testTimeSource.markNow())
 
-            val consumed = bucket.consume(10, config)
+            val consumed = bucket.consume(10, config).bucket
 
             assertEquals(config.maxWarmupPermits, consumed.warmupProgress, tolerance)
         }
@@ -64,7 +64,7 @@ class PermitBucketInvariantsTest {
     fun `refund does not drive warmupProgress below zero`() =
         runTest {
             val config = warmupConfig()
-            val bucket = PermitBucket(balance = -1.0, asOf = testTimeSource.markNow(), warmupProgress = 0.5)
+            val bucket = PermitBucket.Warming(balance = -1.0, asOf = testTimeSource.markNow(), warmupProgress = 0.5)
 
             val refunded = bucket.refund(5, config)
 
@@ -75,7 +75,7 @@ class PermitBucketInvariantsTest {
     fun `long idle floors warmupProgress at zero`() =
         runTest {
             val config = warmupConfig()
-            val bucket = PermitBucket(balance = 0.0, asOf = testTimeSource.markNow(), warmupProgress = 2.0)
+            val bucket = PermitBucket.Warming(balance = 0.0, asOf = testTimeSource.markNow(), warmupProgress = 2.0)
 
             advanceTimeBy(config.warmup * 10)
             val refilled = bucket.refill(config)
@@ -89,7 +89,7 @@ class PermitBucketInvariantsTest {
     fun `refill does not cool warmup while balance is being repaid`() =
         runTest {
             val config = warmupConfig()
-            val bucket = PermitBucket(balance = -2.0, asOf = testTimeSource.markNow(), warmupProgress = 2.5)
+            val bucket = PermitBucket.Warming(balance = -2.0, asOf = testTimeSource.markNow(), warmupProgress = 2.5)
 
             val interval = bucket.refillInterval(config)
             val debtDuration = interval * bucket.permitsOwed
@@ -107,7 +107,7 @@ class PermitBucketInvariantsTest {
     fun `refill cools warmup only by the elapsed time beyond debt repayment`() =
         runTest {
             val config = warmupConfig()
-            val bucket = PermitBucket(balance = -2.0, asOf = testTimeSource.markNow(), warmupProgress = 2.5)
+            val bucket = PermitBucket.Warming(balance = -2.0, asOf = testTimeSource.markNow(), warmupProgress = 2.5)
 
             val interval = bucket.refillInterval(config)
             val debtDuration = interval * bucket.permitsOwed
@@ -136,15 +136,14 @@ class PermitBucketInvariantsTest {
             // Fractional positive balance plus positive warmup progress —
             // the combination that exposes the asymmetry in public refund().
             val bucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0714,
                     asOf = testTimeSource.markNow(),
                     warmupProgress = 0.9,
                 )
 
             val consumed = bucket.consume(1, config)
-            val warmupDelta = consumed.warmupProgress - bucket.warmupProgress
-            val result = consumed.refundCancelled(1, warmupDelta, config)
+            val result = consumed.bucket.refundCancelled(1, consumed.warmupDelta, config)
 
             assertEquals(bucket.balance, result.balance, tolerance)
             assertEquals(bucket.warmupProgress, result.warmupProgress, tolerance)
@@ -158,13 +157,13 @@ class PermitBucketInvariantsTest {
             // pin the precise delta between exact cancellation accounting and
             // the public best-effort refund.
             val bucket =
-                PermitBucket(
+                PermitBucket.Warming(
                     balance = 0.0714,
                     asOf = testTimeSource.markNow(),
                     warmupProgress = 0.9,
                 )
 
-            val result = bucket.consume(1, config).refund(1, config)
+            val result = bucket.consume(1, config).bucket.refund(1, config)
 
             // Public refund subtracts the nominal permit count, so warmup
             // progress drops below the original by exactly max(balance, 0).
