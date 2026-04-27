@@ -7,6 +7,12 @@ The format is based on Keep a Changelog and the project aims to follow Semantic 
 ## [Unreleased]
 
 - Initial public documentation and OSS project scaffolding
+- **Fixed**: `kotlinx-coroutines-core` is now declared as an `api` dependency
+  so consumers calling `Flow.rateLimit()` get `kotlinx.coroutines.flow.Flow`
+  on their compile classpath transitively. Previously declared as
+  `implementation`, which mapped to `<scope>runtime</scope>` in the published
+  POM and forced Maven consumers (and Gradle consumers without their own
+  coroutines dep) to add it explicitly.
 - **Fixed**: `CompositeRateLimiter.tryAcquire()` no longer over-cools
   `SmoothRateLimiter` delegates configured with a warmup ramp. When a
   composite denial required probing remaining delegates for their

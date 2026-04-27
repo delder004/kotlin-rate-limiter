@@ -1,4 +1,5 @@
 plugins {
+    `java-library`
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
@@ -14,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    implementation(libs.kotlinx.coroutines.core)
+    api(libs.kotlinx.coroutines.core)
 
     add("examplesImplementation", sourceSets.main.get().output)
     add("examplesImplementation", libs.ktor.client.core)
