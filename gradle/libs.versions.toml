@@ -5,7 +5,7 @@ ktlint = "14.2.0"
 maven-publish = "0.30.0"
 junit-jupiter = "5.11.4"
 ktor = "2.3.12"
-binary-compatibility-validator = "0.16.3"
+binary-compatibility-validator = "0.18.1"
 dokka = "1.9.20"
 
 [libraries]
