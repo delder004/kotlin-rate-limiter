@@ -1,5 +1,6 @@
 # kotlin-rate-limiter
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.delder004/kotlin-rate-limiter?logo=apachemaven)](https://central.sonatype.com/artifact/io.github.delder004/kotlin-rate-limiter)
 [![Check](https://github.com/delder004/kotlin-rate-limiter/actions/workflows/check.yml/badge.svg)](https://github.com/delder004/kotlin-rate-limiter/actions/workflows/check.yml)
 [![License](https://img.shields.io/github/license/delder004/kotlin-rate-limiter)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/kotlin-2.2.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
