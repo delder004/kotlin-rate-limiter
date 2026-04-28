@@ -4,7 +4,7 @@ kotlinx-coroutines = "1.9.0"
 ktlint = "14.2.0"
 maven-publish = "0.30.0"
 junit-jupiter = "6.0.3"
-ktor = "2.3.12"
+ktor = "3.4.3"
 binary-compatibility-validator = "0.18.1"
 dokka = "2.2.0"
 
