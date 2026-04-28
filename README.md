@@ -24,7 +24,7 @@ This library is:
 
 ## Project Status
 
-- Current version: `0.1.0`
+- Current version: see the Maven Central badge above
 - Stability: early public release
 - Target platform: Kotlin/JVM
 - Java toolchain: JDK 17
@@ -46,7 +46,7 @@ This library is:
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("io.github.delder004:kotlin-rate-limiter:0.1.0")
+    implementation("io.github.delder004:kotlin-rate-limiter:0.2.0")
 }
 ```
 
