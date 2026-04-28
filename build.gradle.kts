@@ -1,9 +1,12 @@
+import java.net.URL
+
 plugins {
     `java-library`
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.binary.compatibility.validator)
+    alias(libs.plugins.dokka)
 }
 
 val examplesSourceSet = sourceSets.create("examples")
@@ -51,4 +54,19 @@ configurations.named(examplesSourceSet.runtimeOnlyConfigurationName) {
 kotlin {
     explicitApi()
     jvmToolchain(17)
+}
+
+tasks.dokkaHtml {
+    moduleName.set("kotlin-rate-limiter")
+    dokkaSourceSets.named("main") {
+        sourceLink {
+            localDirectory.set(file("src/main/kotlin"))
+            remoteUrl.set(URL("https://github.com/delder004/kotlin-rate-limiter/blob/main/src/main/kotlin"))
+            remoteLineSuffix.set("#L")
+        }
+        externalDocumentationLink {
+            url.set(URL("https://kotlinlang.org/api/kotlinx.coroutines/"))
+            packageListUrl.set(URL("https://kotlinlang.org/api/kotlinx.coroutines/package-list"))
+        }
+    }
 }

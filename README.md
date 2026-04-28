@@ -30,6 +30,7 @@ This library is:
 
 ## Documentation
 
+- API reference (Dokka): [delder004.github.io/kotlin-rate-limiter](https://delder004.github.io/kotlin-rate-limiter/)
 - Guides: [`docs/`](docs/)
 - Core interface: [`docs/RateLimiter.md`](docs/RateLimiter.md)
 - Bursty limiter: [`docs/BurstyRateLimiter.md`](docs/BurstyRateLimiter.md)
