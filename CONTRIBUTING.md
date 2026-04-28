@@ -12,7 +12,7 @@ Thanks for contributing to `kotlin-rate-limiter`.
 
 Requirements:
 
-- JDK 21
+- JDK 17
 - A working Gradle environment
 
 Common commands:

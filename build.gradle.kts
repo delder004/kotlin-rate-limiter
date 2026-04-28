@@ -45,5 +45,5 @@ configurations.named(examplesSourceSet.runtimeOnlyConfigurationName) {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }

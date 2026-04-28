@@ -6,7 +6,7 @@
 
 A coroutine-native rate limiter for Kotlin. Controls the pace of outbound requests to external APIs using suspending functions — no threads blocked, no timers running, no framework dependencies.
 
-`kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 21.
+`kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 17 or later.
 
 **Try it live:** [kotlin-rate-limiter-demo.dev](https://kotlin-rate-limiter-demo.dev) — interactive playground to experiment with the limiters in your browser.
 
@@ -26,7 +26,7 @@ This library is:
 - Current version: `0.1.0`
 - Stability: early public release
 - Target platform: Kotlin/JVM
-- Java toolchain: JDK 21
+- Java toolchain: JDK 17
 
 ## Documentation
 
