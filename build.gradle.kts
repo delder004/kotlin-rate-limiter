@@ -1,5 +1,3 @@
-import java.net.URL
-
 plugins {
     `java-library`
     alias(libs.plugins.kotlin.jvm)
@@ -56,17 +54,17 @@ kotlin {
     jvmToolchain(17)
 }
 
-tasks.dokkaHtml {
+dokka {
     moduleName.set("kotlin-rate-limiter")
     dokkaSourceSets.named("main") {
         sourceLink {
             localDirectory.set(file("src/main/kotlin"))
-            remoteUrl.set(URL("https://github.com/delder004/kotlin-rate-limiter/blob/main/src/main/kotlin"))
+            remoteUrl("https://github.com/delder004/kotlin-rate-limiter/blob/main/src/main/kotlin")
             remoteLineSuffix.set("#L")
         }
-        externalDocumentationLink {
-            url.set(URL("https://kotlinlang.org/api/kotlinx.coroutines/"))
-            packageListUrl.set(URL("https://kotlinlang.org/api/kotlinx.coroutines/package-list"))
+        externalDocumentationLinks.register("kotlinx-coroutines") {
+            url("https://kotlinlang.org/api/kotlinx.coroutines/")
+            packageListUrl("https://kotlinlang.org/api/kotlinx.coroutines/package-list")
         }
     }
 }
