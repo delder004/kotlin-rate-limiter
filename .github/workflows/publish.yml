@@ -17,7 +17,18 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - run: ./gradlew publishAllPublicationsToMavenCentralRepository
+      - name: Derive release version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "Tag '$TAG' does not match vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
+            exit 1
+          fi
+          echo "release_version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify and publish
+        run: ./gradlew check publishAllPublicationsToMavenCentralRepository -PreleaseVersion=${{ steps.version.outputs.release_version }}
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}

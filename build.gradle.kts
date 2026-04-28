@@ -8,7 +8,10 @@ plugins {
 val examplesSourceSet = sourceSets.create("examples")
 
 group = "io.github.delder004"
-version = "0.1.0"
+// Set by CI from the release tag via `-PreleaseVersion=…`. The SNAPSHOT
+// fallback is what local builds and any non-release CI run will use; it is
+// not intended to be published.
+version = providers.gradleProperty("releaseVersion").getOrElse("0.1.0-SNAPSHOT")
 
 repositories {
     mavenCentral()
