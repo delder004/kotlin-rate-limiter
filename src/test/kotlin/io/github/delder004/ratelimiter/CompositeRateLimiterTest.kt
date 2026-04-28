@@ -158,14 +158,12 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
             assertIs<Permit.Denied>(b.tryAcquire())
         }
 
-    // Regression test for a pre-existing bug exposed by the migration review:
-    // CompositeRateLimiter.collectRetryAfterFromRemaining used to probe delegates
-    // via tryAcquire + refund, which over-cools WarmingSmoothLimiter because a
-    // granted tryAcquire leaves heat unchanged but refund always decrements it.
-    // After the fix, the probe uses the internal peekWait path and the warming
-    // delegate's state must be untouched by a composite denial. We compare the
-    // post-probe delay sequence on the warming limiter against a baseline
-    // sequence recorded in an independent virtual-time scope with no probe.
+    // Probing delegates via tryAcquire + refund over-cools WarmingSmoothLimiter:
+    // a granted tryAcquire leaves heat unchanged but refund always decrements it.
+    // The probe path must use peekWait so a warming delegate's state is untouched
+    // by a composite denial. We compare the post-probe delay sequence on the
+    // warming limiter against a baseline sequence recorded in an independent
+    // virtual-time scope with no probe.
     @Test
     fun `tryAcquire denial does not mutate warming smooth delegate`() {
         fun snapshotDelays(runProbe: Boolean): List<Long> {

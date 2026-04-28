@@ -9,6 +9,8 @@ A coroutine-native rate limiter for Kotlin. Controls the pace of outbound reques
 
 `kotlin-rate-limiter` is currently an early-stage library with a deliberately small API surface. The project targets Kotlin/JVM, uses Kotlin 2.2.20, and runs on JDK 17 or later.
 
+**API reference:** [delder004.github.io/kotlin-rate-limiter](https://delder004.github.io/kotlin-rate-limiter/) — full Dokka-generated docs.
+
 **Try it live:** [kotlin-rate-limiter-demo.dev](https://kotlin-rate-limiter-demo.dev) — interactive playground to experiment with the limiters in your browser.
 
 ## Why?
@@ -34,6 +36,7 @@ This library is:
 - API reference (Dokka): [delder004.github.io/kotlin-rate-limiter](https://delder004.github.io/kotlin-rate-limiter/)
 - Guides: [`docs/`](docs/)
 - Core interface: [`docs/RateLimiter.md`](docs/RateLimiter.md)
+- Refundable interface: [`docs/RefundableRateLimiter.md`](docs/RefundableRateLimiter.md)
 - Bursty limiter: [`docs/BurstyRateLimiter.md`](docs/BurstyRateLimiter.md)
 - Smooth limiter: [`docs/SmoothRateLimiter.md`](docs/SmoothRateLimiter.md)
 - Composite limiter: [`docs/CompositeRateLimiter.md`](docs/CompositeRateLimiter.md)
@@ -106,7 +109,7 @@ val limiter = BurstyRateLimiter(
 )
 ```
 
-Returns `RefundableRateLimiter`, which also exposes `refund(permits)` when reserved work is abandoned before completion.
+Returns [`RefundableRateLimiter`](docs/RefundableRateLimiter.md), which also exposes `refund(permits)` when reserved work is abandoned before completion.
 
 #### SmoothRateLimiter
 
@@ -121,11 +124,11 @@ val limiter = SmoothRateLimiter(
 )
 ```
 
-Returns `RefundableRateLimiter`, which also exposes `refund(permits)` when reserved work is abandoned before completion.
+Returns [`RefundableRateLimiter`](docs/RefundableRateLimiter.md), which also exposes `refund(permits)` when reserved work is abandoned before completion.
 
 #### CompositeRateLimiter
 
-Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. `tryAcquire()` returns the longest `retryAfter` among denying children. Use for APIs with layered limits.
+Combines multiple limiters. `acquire()` only proceeds when ALL limiters have capacity. On `tryAcquire()` denial, every remaining child is probed for its `retryAfter` and the longest is returned. Use for APIs with layered limits.
 
 ```kotlin
 val limiter = CompositeRateLimiter(
@@ -134,7 +137,7 @@ val limiter = CompositeRateLimiter(
 )
 ```
 
-Partial grants are rolled back automatically if a later limiter denies the same request.
+When every child is one of this library's own limiters, `acquire()` reserves all children up front and suspends once for the longest reservation. Partial grants are rolled back automatically on cancellation or if a later limiter denies the request. See [`docs/CompositeRateLimiter.md`](docs/CompositeRateLimiter.md) for the full semantics, including the third-party fallback path.
 
 ### Extensions
 

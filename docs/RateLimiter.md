@@ -30,6 +30,7 @@ limiter.acquire(3)     // consumes 3 permits
 - **Cancellation-safe.** If a coroutine is cancelled while suspended in `acquire()`, its permits are returned to the limiter. No permits are leaked.
 - **Current caller pays the wait.** `acquire()` reserves permits atomically, then suspends the calling coroutine for the required delay. If permits are not currently available, the caller that made the request waits before `acquire()` returns.
 - **Cancellation restores permits for future callers.** If a suspended `acquire()` is cancelled, its permits are refunded. This does not retroactively shorten delays that other waiters already computed before the cancellation.
+- **Rewind exactness depends on the limiter.** [BurstyRateLimiter](BurstyRateLimiter.md) and the zero-warmup [SmoothRateLimiter](SmoothRateLimiter.md) rewind cancellations exactly. The warming [SmoothRateLimiter](SmoothRateLimiter.md) is exact when the reservation hasn't been touched concurrently and falls back to a bounded best-effort rewind otherwise — see its doc for the full envelope.
 - **Positive permits only.** `acquire(permits)` requires `permits > 0` and throws `IllegalArgumentException` otherwise.
 - **Timeouts.** There's no built-in timeout parameter. Use the standard library:
 
