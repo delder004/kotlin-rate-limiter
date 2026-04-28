@@ -11,7 +11,7 @@ Use when your routes have a clean hierarchy and don't overlap (e.g., `/search`, 
 ```kotlin
 import io.ktor.client.*
 import io.ktor.client.statement.*
-import ratelimiter.*
+import io.github.delder004.ratelimiter.*
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 

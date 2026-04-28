@@ -51,8 +51,8 @@ dependencies {
 ## Quick Start
 
 ```kotlin
-import ratelimiter.BurstyRateLimiter
-import ratelimiter.withPermit
+import io.github.delder004.ratelimiter.BurstyRateLimiter
+import io.github.delder004.ratelimiter.withPermit
 import kotlin.time.Duration.Companion.seconds
 
 val limiter = BurstyRateLimiter(permits = 10, per = 1.seconds)

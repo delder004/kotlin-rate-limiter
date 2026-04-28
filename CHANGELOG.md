@@ -7,6 +7,12 @@ The format is based on Keep a Changelog and the project aims to follow Semantic 
 ## [Unreleased]
 
 - Initial public documentation and OSS project scaffolding
+- **Changed (breaking)**: All public types moved from package `ratelimiter` to
+  `io.github.delder004.ratelimiter` to match the Maven group coordinate and
+  avoid the overly generic top-level package name. Consumers must update their
+  imports (e.g. `import ratelimiter.BurstyRateLimiter` →
+  `import io.github.delder004.ratelimiter.BurstyRateLimiter`). No source-level
+  API shape changes.
 - **Fixed**: `kotlinx-coroutines-core` is now declared as an `api` dependency
   so consumers calling `Flow.rateLimit()` get `kotlinx.coroutines.flow.Flow`
   on their compile classpath transitively. Previously declared as
