@@ -25,7 +25,8 @@ internal class FixedIntervalLimiter(
     private val capacity: Double,
     private val interval: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
-) : PeekableRateLimiter {
+) : PeekableRateLimiter,
+    ReservableRateLimiter {
     init {
         require(capacity >= 1.0) { "capacity must be at least 1.0, was $capacity" }
         require(interval > Duration.ZERO) { "interval must be positive, was $interval" }
@@ -40,11 +41,11 @@ internal class FixedIntervalLimiter(
 
     override suspend fun acquire(permits: Int) {
         require(permits > 0) { "permits must be positive, was $permits" }
-        val wait = synchronized(lock) { reserve(permits) }
+        val reservation = reserve(permits)
         try {
-            delay(wait)
+            delay(reservation.wait)
         } catch (e: CancellationException) {
-            refund(permits)
+            reservation.cancel()
             throw e
         }
     }
@@ -76,10 +77,22 @@ internal class FixedIntervalLimiter(
             if (newNext > now) newNext - now else Duration.ZERO
         }
 
-    private fun reserve(permits: Int): Duration {
-        val now = timeSource.markNow()
-        val base = maxOf(nextPermitAt, now - interval * capacity)
-        nextPermitAt = base + interval * permits
-        return if (nextPermitAt > now) nextPermitAt - now else Duration.ZERO
+    override fun reserve(permits: Int): Reservation {
+        require(permits > 0) { "permits must be positive, was $permits" }
+        val wait =
+            synchronized(lock) {
+                val now = timeSource.markNow()
+                val base = maxOf(nextPermitAt, now - interval * capacity)
+                nextPermitAt = base + interval * permits
+                if (nextPermitAt > now) nextPermitAt - now else Duration.ZERO
+            }
+        return FixedReservation(wait, permits)
+    }
+
+    private inner class FixedReservation(
+        override val wait: Duration,
+        private val permits: Int,
+    ) : Reservation {
+        override fun cancel() = refund(permits)
     }
 }

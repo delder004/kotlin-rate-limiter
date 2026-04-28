@@ -7,6 +7,20 @@ The format is based on Keep a Changelog and the project aims to follow Semantic 
 ## [Unreleased]
 
 - Initial public documentation and OSS project scaffolding
+- **Changed (behavior)**: `CompositeRateLimiter.acquire()` now reserves every
+  delegate atomically up front, delays once for `max(wait)`, and rolls every
+  reservation back on cancellation, instead of acquiring delegates sequentially
+  and refunding earlier ones if a later one denies. The new path runs whenever
+  every delegate is one of the library's own implementations
+  (`BurstyRateLimiter`, `SmoothRateLimiter`); third-party `RefundableRateLimiter`
+  delegates fall back to the legacy sequential-acquire-with-rollback path. Both
+  paths preserve borrow-from-future for `permits > delegate.capacity`. Adds an
+  internal `ReservableRateLimiter` / `Reservation` primitive that the limiters
+  expose for the composite to coordinate; not part of the public API.
+- **Docs**: `Permit.Denied.retryAfter` no longer implies a non-suspending retry
+  will succeed after that wait — under contention another caller may grab the
+  freed credit, and `tryAcquire` cannot borrow from future refill at all when
+  the request exceeds a delegate's burst capacity.
 - **Changed (breaking)**: All public types moved from package `ratelimiter` to
   `io.github.delder004.ratelimiter` to match the Maven group coordinate and
   avoid the overly generic top-level package name. Consumers must update their

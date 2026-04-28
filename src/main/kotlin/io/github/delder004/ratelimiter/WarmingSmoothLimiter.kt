@@ -35,7 +35,8 @@ internal class WarmingSmoothLimiter(
     private val stableInterval: Duration,
     warmup: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
-) : PeekableRateLimiter {
+) : PeekableRateLimiter,
+    ReservableRateLimiter {
     init {
         require(stableInterval > Duration.ZERO) { "stableInterval must be positive, was $stableInterval" }
         require(warmup > Duration.ZERO) { "warmup must be positive, was $warmup" }
@@ -62,46 +63,54 @@ internal class WarmingSmoothLimiter(
         val version: Long,
     )
 
-    private data class Reservation(
-        val wait: Duration,
-        val heatDelta: Double,
-        val pre: PreState,
-    )
-
     /**
      * Reads the four pre-mutation fields. This helper exists to enforce the
      * ordering invariant that the snapshot must be captured before
      * [coolHeatTo] runs — if a future edit moves this call below `coolHeatTo`,
      * the fast-path cancellation path will restore already-cooled state and
      * replay cooling against the same window twice. Keep the `capturePreState`
-     * call the *first* thing inside [acquire]'s `synchronized` block.
+     * call the *first* thing inside [reserve]'s `synchronized` block.
      */
     private fun capturePreState(): PreState = PreState(nextPermitAt, heat, heatUpdatedAt, version)
 
     override suspend fun acquire(permits: Int) {
         require(permits > 0) { "permits must be positive, was $permits" }
-
-        val reservation =
-            synchronized(lock) {
-                val pre = capturePreState()
-                val now = timeSource.markNow()
-                coolHeatTo(now)
-                val (wait, heatDelta) = reserveAfterCool(now, permits)
-                version++
-                Reservation(wait = wait, heatDelta = heatDelta, pre = pre)
-            }
-
+        val reservation = reserve(permits)
         try {
             delay(reservation.wait)
         } catch (e: CancellationException) {
+            reservation.cancel()
+            throw e
+        }
+    }
+
+    override fun reserve(permits: Int): Reservation {
+        require(permits > 0) { "permits must be positive, was $permits" }
+        return synchronized(lock) {
+            val pre = capturePreState()
+            val now = timeSource.markNow()
+            coolHeatTo(now)
+            val (wait, heatDelta) = reserveAfterCool(now, permits)
+            version++
+            WarmingReservation(wait, permits, heatDelta, pre)
+        }
+    }
+
+    private inner class WarmingReservation(
+        override val wait: Duration,
+        private val permits: Int,
+        private val heatDelta: Double,
+        private val pre: PreState,
+    ) : Reservation {
+        override fun cancel() {
             synchronized(lock) {
                 val now = timeSource.markNow()
-                if (version == reservation.pre.version + 1) {
+                if (version == pre.version + 1) {
                     // Fast path: restore pre-reservation state and advance cooling
                     // to now. Exact for any elapsed delay.
-                    nextPermitAt = reservation.pre.nextPermitAt
-                    heat = reservation.pre.heat
-                    heatUpdatedAt = reservation.pre.heatUpdatedAt
+                    nextPermitAt = pre.nextPermitAt
+                    heat = pre.heat
+                    heatUpdatedAt = pre.heatUpdatedAt
                     coolHeatTo(now)
                 } else {
                     // Slow path: concurrent mutations moved the tail while we
@@ -110,11 +119,10 @@ internal class WarmingSmoothLimiter(
                     coolHeatTo(now)
                     val interval = currentInterval()
                     nextPermitAt = maxOf(nextPermitAt - interval * permits, now - interval)
-                    heat = (heat - reservation.heatDelta).coerceAtLeast(0.0)
+                    heat = (heat - heatDelta).coerceAtLeast(0.0)
                 }
                 version++
             }
-            throw e
         }
     }
 

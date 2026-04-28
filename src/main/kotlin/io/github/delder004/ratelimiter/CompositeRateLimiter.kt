@@ -1,12 +1,21 @@
 package io.github.delder004.ratelimiter
 
+import kotlinx.coroutines.delay
 import kotlin.time.Duration
 
 /**
  * Creates a limiter that acquires permits from every supplied [limiters].
  *
- * A request succeeds only when all delegates can satisfy it. If one delegate
- * fails, any already-acquired permits are refunded before returning.
+ * A request succeeds only when all delegates can satisfy it. When every
+ * delegate is one of the library's own implementations, every delegate is
+ * reserved synchronously up front, the caller delays once for the longest
+ * reservation, and a cancellation rolls every reservation back (fast-path
+ * exact rewind for both fixed-interval and warming-smooth state). The
+ * rollback iterates the delegates in reverse and is not globally atomic —
+ * a concurrent observer touching delegates directly could see partially
+ * rolled-back state mid-loop. For third-party [RefundableRateLimiter]
+ * delegates the legacy sequential acquire-with-rollback is used as a
+ * fallback.
  *
  * @param limiters delegate limiters that all participate in each acquisition
  */
@@ -20,14 +29,33 @@ internal class CompositeRateLimiterImpl(
         require(limiters.isNotEmpty()) { "There must be at least one rateLimiter" }
     }
 
+    private val allReservable: Boolean = limiters.all { it is ReservableRateLimiter }
+
     override suspend fun acquire(permits: Int) {
         require(permits > 0) { "Permits must be positive, was $permits" }
-        acquireAllOrRollback(permits)
+        if (allReservable) {
+            atomicReserveAcquire(permits)
+        } else {
+            acquireAllOrRollback(permits)
+        }
     }
 
     override fun tryAcquire(permits: Int): Permit {
         require(permits > 0) { "Permits must be positive, was $permits" }
         return tryAcquireAllOrRollback(permits)
+    }
+
+    private suspend fun atomicReserveAcquire(permits: Int) {
+        val reservations = mutableListOf<Reservation>()
+        try {
+            limiters.forEach { limiter ->
+                reservations += (limiter as ReservableRateLimiter).reserve(permits)
+            }
+            delay(reservations.maxOf { it.wait })
+        } catch (e: Throwable) {
+            reservations.asReversed().forEach { it.cancel() }
+            throw e
+        }
     }
 
     private suspend fun acquireAllOrRollback(permits: Int) {

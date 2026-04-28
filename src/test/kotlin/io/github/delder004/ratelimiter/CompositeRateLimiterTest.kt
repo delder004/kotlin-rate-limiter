@@ -223,13 +223,14 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
                 )
             // Warm up so the rollback has non-trivial heat to handle, then
             // advance time so warm has a stored permit at composite-acquire
-            // time. Without this advance, warm would still be in debt and
-            // composite.acquire() would suspend inside warm.acquire() before
-            // ever reaching slow — which means cancellation would land in
-            // warm's own catch block, not composite's, and `acquired` would
-            // be empty. The time advance is what forces the acquireAllOrRollback
-            // path to actually grant warm, add it to `acquired`, and then
-            // block on slow — so cancellation actually exercises the rollback.
+            // time. With the reserve path, warm.reserve runs before the
+            // composite suspends and captures a pre-state snapshot; on
+            // cancellation, WarmingReservation.cancel uses that snapshot for
+            // an exact fast-path rewind of nextPermitAt and heat. The time
+            // advance keeps warm's reserve wait short enough that the test
+            // doesn't depend on the slow delegate's wait dominating, and
+            // ensures heat is non-zero at reserve time so the rewind has
+            // something meaningful to restore.
             repeat(3) { warm.acquire() }
             advanceTimeBy(1.seconds)
 
@@ -245,15 +246,99 @@ class CompositeRateLimiterTest : RateLimiterContractTest() {
 
             // The rollback must have refunded the warm delegate, restoring a
             // stored permit: the next direct acquire on warm should be
-            // immediate. If rollback didn't run (the original bug shape for
-            // this test), warm would still have consumed the permit and the
-            // first delay would reflect a borrowed-permit cold-ramp wait.
+            // immediate. If rollback didn't run, warm would still have
+            // consumed the permit and the first delay would reflect a
+            // borrowed-permit cold-ramp wait.
             val delays = recordDelays(warm, 3)
             assertEquals(
                 0L,
                 delays[0],
                 "rollback should credit back a stored permit, so the next acquire is immediate",
             )
+        }
+
+    @Test
+    fun `acquire reserves all delegates synchronously before suspending`() =
+        runTest {
+            // Both delegates are capacity 1 / interval 1s. After the first
+            // composite.acquire(), both delegates' nextPermitAt sit at t=0
+            // (committed but no refill yet). The second composite.acquire()
+            // must reserve BOTH delegates before it suspends — and equal
+            // mid-wait retryAfters from a direct tryAcquire on each delegate
+            // are the proof. Under the old sequential acquire-with-rollback,
+            // only the first delegate would have advanced before suspending,
+            // and a mid-wait tryAcquire on the second would compute a
+            // strictly smaller retryAfter than the first.
+            //
+            // Note: total wall time isn't a useful discriminator here. With
+            // virtual time, sequential A-then-B and reserve-all max(A,B)
+            // both add up to max(wait_A, wait_B) for a single caller — wait
+            // elapsed on A counts as refill toward B. Mid-wait state is
+            // what differs.
+            val a = BurstyRateLimiter(1, 1.seconds, testTimeSource)
+            val b = BurstyRateLimiter(1, 1.seconds, testTimeSource)
+            val limiter = CompositeRateLimiter(a, b)
+            limiter.acquire() // exhaust at t=0; both nextPermitAt = 0
+
+            val job = launch { limiter.acquire() }
+            runCurrent()
+            assertFalse(job.isCompleted, "composite must be suspended in delay()")
+
+            val aDenied = a.tryAcquire()
+            val bDenied = b.tryAcquire()
+            assertIs<Permit.Denied>(aDenied)
+            assertIs<Permit.Denied>(bDenied)
+            assertEquals(
+                aDenied.retryAfter,
+                bDenied.retryAfter,
+                "both delegates should be reserved before composite suspends; " +
+                    "unequal retryAfters indicate sequential acquire-with-rollback",
+            )
+
+            job.cancel()
+        }
+
+    @Test
+    fun `acquire supports permits greater than delegate capacity via borrow-from-future`() =
+        runTest {
+            // slow's capacity is 2, but composite.acquire(5) must still work
+            // by reserving future production. A retry loop based on tryAcquire
+            // would livelock here because slow.tryAcquire(5) can never grant
+            // (stored credit is capped at capacity * interval = 1s = 2 permits).
+            val fast = BurstyRateLimiter(5, 1.seconds, testTimeSource) // interval 200ms
+            val slow = BurstyRateLimiter(2, 1.seconds, testTimeSource) // interval 500ms
+            val limiter = CompositeRateLimiter(fast, slow)
+
+            val before = currentTime
+            limiter.acquire(5)
+            // slow has 2 stored permits; needs to wait for 3 more at 500ms each = 1500ms.
+            // fast can serve all 5 immediately. Composite delays max(0, 1500ms).
+            assertEquals(1500L, currentTime - before)
+        }
+
+    @Test
+    fun `cancellation during reservation wait rolls back all delegates`() =
+        runTest {
+            val fast = BurstyRateLimiter(2, 1.seconds, testTimeSource)
+            val slow = BurstyRateLimiter(1, 10.seconds, testTimeSource)
+            val limiter = CompositeRateLimiter(fast, slow)
+
+            slow.acquire() // exhaust slow
+
+            val job = launch { limiter.acquire() }
+            runCurrent()
+            assertFalse(job.isCompleted, "composite must be waiting for slow's refill")
+
+            job.cancel()
+            runCurrent()
+
+            // fast: rolled back to its pre-reservation state. Both permits available.
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertEquals(Permit.Granted, fast.tryAcquire())
+            assertIs<Permit.Denied>(fast.tryAcquire())
+
+            // slow: rolled back to its post-direct-acquire state (still exhausted).
+            assertIs<Permit.Denied>(slow.tryAcquire())
         }
 
     @Test
