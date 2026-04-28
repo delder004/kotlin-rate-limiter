@@ -48,5 +48,6 @@ configurations.named(examplesSourceSet.runtimeOnlyConfigurationName) {
 }
 
 kotlin {
+    explicitApi()
     jvmToolchain(17)
 }

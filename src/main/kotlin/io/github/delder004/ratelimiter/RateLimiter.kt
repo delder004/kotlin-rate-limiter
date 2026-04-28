@@ -5,14 +5,14 @@ package io.github.delder004.ratelimiter
  *
  * Implementations are expected to be safe for concurrent use.
  */
-interface RateLimiter {
+public interface RateLimiter {
     /**
      * Suspends until [permits] can be acquired.
      *
      * @param permits number of permits to acquire; must be positive
      * @throws IllegalArgumentException if [permits] is not positive
      */
-    suspend fun acquire(permits: Int = 1): Unit
+    public suspend fun acquire(permits: Int = 1)
 
     /**
      * Attempts to acquire [permits] immediately without suspending.
@@ -22,5 +22,5 @@ interface RateLimiter {
      * [Permit.Denied] with the delay until a retry may succeed
      * @throws IllegalArgumentException if [permits] is not positive
      */
-    fun tryAcquire(permits: Int = 1): Permit
+    public fun tryAcquire(permits: Int = 1): Permit
 }

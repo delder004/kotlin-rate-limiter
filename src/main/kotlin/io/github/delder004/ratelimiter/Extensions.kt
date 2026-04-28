@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.flow
  * @param permits number of permits to acquire before invoking [block]
  * @param block work to execute after the permits have been acquired
  */
-suspend fun <T> RateLimiter.withPermit(
+public suspend fun <T> RateLimiter.withPermit(
     permits: Int = 1,
     block: suspend () -> T,
 ): T {
@@ -28,7 +28,7 @@ suspend fun <T> RateLimiter.withPermit(
  * @param limiter limiter consulted before each emission
  * @param permits number of permits to acquire per emitted element
  */
-fun <T> Flow<T>.rateLimit(
+public fun <T> Flow<T>.rateLimit(
     limiter: RateLimiter,
     permits: Int = 1,
 ): Flow<T> =

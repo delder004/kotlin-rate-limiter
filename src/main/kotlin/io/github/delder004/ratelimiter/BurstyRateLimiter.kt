@@ -16,7 +16,7 @@ import kotlin.time.TimeSource
  *   (both [TimeSource.Monotonic] and `kotlinx-coroutines-test`'s `testTimeSource` satisfy this)
  */
 @Suppress("FunctionName")
-fun BurstyRateLimiter(
+public fun BurstyRateLimiter(
     permits: Int,
     per: Duration,
     timeSource: TimeSource = TimeSource.Monotonic,

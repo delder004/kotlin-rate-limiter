@@ -5,11 +5,11 @@ import kotlin.time.Duration
 /**
  * Result of a non-suspending permit acquisition attempt.
  */
-sealed interface Permit {
+public sealed interface Permit {
     /**
      * Indicates that the requested permits were acquired immediately.
      */
-    data object Granted : Permit
+    public data object Granted : Permit
 
     /**
      * Indicates that the requested permits are not yet available.
@@ -21,7 +21,7 @@ sealed interface Permit {
      *   exceeds a delegate's burst capacity `tryAcquire` cannot borrow from
      *   future refill at all (only suspending [RateLimiter.acquire] can).
      */
-    data class Denied(
+    public data class Denied(
         val retryAfter: Duration,
     ) : Permit
 }

@@ -22,7 +22,7 @@ import kotlin.time.TimeSource
  *   `testTimeSource` satisfy this)
  */
 @Suppress("FunctionName")
-fun SmoothRateLimiter(
+public fun SmoothRateLimiter(
     permits: Int,
     per: Duration,
     warmup: Duration = Duration.ZERO,

@@ -20,7 +20,7 @@ import kotlin.time.Duration
  * @param limiters delegate limiters that all participate in each acquisition
  */
 @Suppress("FunctionName")
-fun CompositeRateLimiter(vararg limiters: RefundableRateLimiter): RateLimiter = CompositeRateLimiterImpl(limiters.toList())
+public fun CompositeRateLimiter(vararg limiters: RefundableRateLimiter): RateLimiter = CompositeRateLimiterImpl(limiters.toList())
 
 internal class CompositeRateLimiterImpl(
     private val limiters: List<RefundableRateLimiter>,
